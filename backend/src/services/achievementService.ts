@@ -887,7 +887,30 @@ const initializeAchievementTables = async (): Promise<void> => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     if (getSqlDialect() === 'postgres') {
+      // Once uniqueness is enforced, re-scanning the entire event history at every
+      // API/worker startup cannot remove any duplicates and can block cold requests.
+      const uniqueIndexes = await db.all<{ table_name: string; key_columns: string }>(`
+        SELECT relation.relname AS table_name,
+               STRING_AGG(attribute.attname, ',' ORDER BY attribute.attname) AS key_columns
+          FROM pg_index index_info
+          JOIN pg_class relation ON relation.oid = index_info.indrelid
+          JOIN LATERAL UNNEST(index_info.indkey) WITH ORDINALITY AS key_column(attnum, position)
+            ON key_column.position <= index_info.indnkeyatts
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = relation.oid AND attribute.attnum = key_column.attnum
+         WHERE index_info.indisunique AND index_info.indisvalid AND index_info.indisready AND index_info.indislive
+           AND index_info.indpred IS NULL AND index_info.indexprs IS NULL
+           AND relation.oid IN (
+             TO_REGCLASS('achievements'), TO_REGCLASS('user_achievements'),
+             TO_REGCLASS('user_achievement_stats'), TO_REGCLASS('achievement_grant_logs'),
+             TO_REGCLASS('achievement_events'), TO_REGCLASS('achievement_evaluation_queue')
+           )
+         GROUP BY index_info.indexrelid, relation.relname
+      `);
+      const uniqueKeys = new Set(uniqueIndexes.map((index) => `${index.table_name}:${index.key_columns}`));
       const dedupeRows = async (table: string, partitionBy: string, orderBy = 'ctid DESC') => {
+        const keyColumns = partitionBy.split(',').map((column) => column.trim()).sort().join(',');
+        if (uniqueKeys.has(`${table}:${keyColumns}`)) return;
         await db.run(`
           DELETE FROM ${table}
            WHERE ctid IN (

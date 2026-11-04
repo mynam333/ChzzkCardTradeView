@@ -19,6 +19,33 @@ beforeEach(() => {
 });
 
 describe('achievement database load', () => {
+  it('does not scan historical rows when PostgreSQL already enforces the required unique keys', async () => {
+    mocks.db.all.mockResolvedValue([
+      { table_name: 'achievements', key_columns: 'code' },
+      { table_name: 'user_achievements', key_columns: 'achievement_id,repeat_key,user_id' },
+      { table_name: 'user_achievement_stats', key_columns: 'stat_key,user_id' },
+      { table_name: 'achievement_grant_logs', key_columns: 'achievement_id,repeat_key,user_id' },
+      { table_name: 'achievement_events', key_columns: 'event_key' },
+      { table_name: 'achievement_evaluation_queue', key_columns: 'dedupe_key' }
+    ]);
+    const { ensureAchievementTables } = await import('../services/achievementService');
+    await ensureAchievementTables();
+    expect(mocks.db.run.mock.calls.filter(([sql]) => /ROW_NUMBER\(\) OVER/.test(sql))).toHaveLength(0);
+    const indexQuery = mocks.db.all.mock.calls.find(([sql]) => /FROM pg_index/.test(sql))?.[0];
+    expect(indexQuery).toContain('index_info.indisvalid');
+    expect(indexQuery).toContain('index_info.indpred IS NULL');
+    expect(indexQuery).toContain('key_column.position <= index_info.indnkeyatts');
+  });
+
+  it('retains duplicate cleanup only for keys whose unique index is missing', async () => {
+    mocks.db.all.mockResolvedValue([{ table_name: 'achievement_events', key_columns: 'event_key' }]);
+    const { ensureAchievementTables } = await import('../services/achievementService');
+    await ensureAchievementTables();
+    const scans = mocks.db.run.mock.calls.filter(([sql]) => /ROW_NUMBER\(\) OVER/.test(sql));
+    expect(scans).toHaveLength(5);
+    expect(scans.every(([sql]) => !/DELETE FROM achievement_events\s/.test(sql))).toBe(true);
+  });
+
   it('shares first-request schema initialization across simultaneous events', async () => {
     let resume!: () => void;
     mocks.db.run.mockImplementationOnce(() => new Promise(resolve => { resume = () => resolve({ changes: 0 }); }));
