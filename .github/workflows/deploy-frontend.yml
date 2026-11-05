@@ -64,6 +64,11 @@ jobs:
       - name: Test large inventory and trade selection
         run: pnpm --filter frontend test:inventory
 
+      - name: Test shared icon assets and navigation
+        run: |
+          node frontend/scripts/generate-icon-assets.mjs
+          node --test frontend/src/lib/iconLibraryPerformance.test.mjs
+
       - name: Build frontend
         run: pnpm --filter frontend build
         env:

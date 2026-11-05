@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build && node scripts/copy-cloudflare-pages-files.mjs",
+    "dev": "node scripts/generate-icon-assets.mjs && next dev",
+    "build": "node scripts/generate-icon-assets.mjs && next build && node scripts/copy-cloudflare-pages-files.mjs",
     "start": "next start",
     "lint": "eslint",
     "test:cosmetics": "vitest run src/lib/cosmetics.test.ts src/lib/cosmeticFrameLayers.test.ts src/app/CosmeticFrame.test.tsx",

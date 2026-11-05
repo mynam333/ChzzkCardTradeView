@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Award, Edit3, Link2, RefreshCw, Search, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { appIconExists, suggestedIconOptions } from '@/lib/iconLibrary';
+import { appIconExists, suggestedIconOptions } from '@/lib/iconLibraryAdmin';
 import type { AdminUser, SubscriptionTitleRule, UserTitle } from '@/lib/types';
 import { useApp } from './AppContext';
 import { UserTitleBadge, UserTitleList } from './UserTitleBadge';

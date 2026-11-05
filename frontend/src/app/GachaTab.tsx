@@ -653,7 +653,7 @@ export const GachaTab: React.FC = () => {
   const fetchMarketPending = async () => {
     if (!isAuthed()) return;
     try {
-      const res = await apiFetch('/market/my');
+      const res = await apiFetch('/market/my/pending-cards');
       if (res.ok) {
         const data = await res.json();
         setMyMarketListings(data);

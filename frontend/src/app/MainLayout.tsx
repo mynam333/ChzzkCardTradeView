@@ -26,6 +26,8 @@ import { MobileLoopDock } from './MobileLoopDock';
 
 type NavItem = { id: TabId; label: string; icon: typeof Home };
 
+const tabRoute = (tab: TabId) => tab === 'main' ? '/' : `/${tab}`;
+
 const LOGO_EASTER_EGG_SESSION_KEY = 'chikapo:easter-egg:logo-clicks';
 const LOGO_EASTER_EGG_REQUIRED_CLICKS = 9;
 const LOGO_EASTER_EGG_WINDOW_MS = 3600;
@@ -37,6 +39,9 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const logoEasterEggClicks = React.useRef<number[]>([]);
   const logoEasterEggPulseTimer = React.useRef<number | null>(null);
   const [logoEasterEggPulse, setLogoEasterEggPulse] = React.useState(false);
+  const prefetchTab = React.useCallback((tab: TabId) => {
+    if (tab !== activeTab) router.prefetch(tabRoute(tab));
+  }, [activeTab, router]);
 
   React.useEffect(() => () => {
     if (logoEasterEggPulseTimer.current !== null) window.clearTimeout(logoEasterEggPulseTimer.current);
@@ -122,6 +127,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           <button
             type="button"
             onClick={handleDesktopLogoClick}
+            onPointerEnter={() => prefetchTab('main')}
+            onFocus={() => prefetchTab('main')}
             className="flex min-w-0 flex-1 appearance-none items-center gap-3 border-0 bg-transparent p-0 text-left"
             aria-label="메인 페이지로 이동"
           >
@@ -194,6 +201,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
+                onPointerEnter={() => prefetchTab(item.id)}
+                onFocus={() => prefetchTab(item.id)}
                 className={`cute-wiggle-hover flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all duration-200 ${
                   isActive
                     ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20 -translate-y-0.5'
@@ -212,6 +221,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           <button
             type="button"
             onClick={() => router.push('/arena')}
+            onPointerEnter={() => prefetchTab('arena')}
+            onFocus={() => prefetchTab('arena')}
             className="cute-wiggle-hover flex w-full items-center gap-3 rounded-2xl border border-primary/20 bg-white/70 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 hover:bg-secondary/70 dark:bg-white/10"
           >
             <Swords className="h-4.5 w-4.5 text-primary" />
@@ -238,6 +249,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         <button
           type="button"
           onClick={() => setActiveTab('main')}
+          onPointerEnter={() => prefetchTab('main')}
+          onFocus={() => prefetchTab('main')}
           className="flex min-w-0 appearance-none items-center gap-2.5 border-0 bg-transparent p-0 text-left"
           aria-label="메인 페이지로 이동"
         >
@@ -295,6 +308,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         activeId={activeTab}
         ariaLabel="모바일 주요 메뉴"
         dataAttribute="mobile-dock"
+        onIntent={(id) => prefetchTab(id)}
         onSelect={(id) => setActiveTab(id)}
       />
 

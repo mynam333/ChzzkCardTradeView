@@ -14,6 +14,7 @@ type MobileLoopDockProps<T extends string> = {
   activeId: T;
   ariaLabel: string;
   onSelect: (id: T, item: MobileLoopDockItem<T>) => void;
+  onIntent?: (id: T, item: MobileLoopDockItem<T>) => void;
   dataAttribute?: string;
   surfaceShadowClassName?: string;
 };
@@ -26,6 +27,7 @@ export function MobileLoopDock<T extends string>({
   activeId,
   ariaLabel,
   onSelect,
+  onIntent,
   dataAttribute,
   surfaceShadowClassName = 'shadow-[0_18px_46px_rgba(20,101,170,0.20)] dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]'
 }: MobileLoopDockProps<T>) {
@@ -64,6 +66,8 @@ export function MobileLoopDock<T extends string>({
   const settleMobileDockToOffset = (offset: number) => {
     const nextItem = items[loopIndex(activeNavIndex + offset, items.length)];
     if (!nextItem || nextItem.id === activeId) return;
+
+    onIntent?.(nextItem.id, nextItem);
 
     if (dockSnapTimer.current !== null) window.clearTimeout(dockSnapTimer.current);
     dockClickSuppressed.current = true;
@@ -172,7 +176,10 @@ export function MobileLoopDock<T extends string>({
         value={activeId}
         onChange={(event) => {
           const nextItem = items.find((item) => item.id === event.target.value);
-          if (nextItem) onSelect(nextItem.id, nextItem);
+          if (nextItem) {
+            onIntent?.(nextItem.id, nextItem);
+            onSelect(nextItem.id, nextItem);
+          }
         }}
       >
         {items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -213,10 +220,13 @@ export function MobileLoopDock<T extends string>({
               key={`${item.id}-${offset}`}
               type="button"
               onPointerDown={() => setDockPressedId(item.id)}
+              onPointerEnter={() => onIntent?.(item.id, item)}
+              onFocus={() => onIntent?.(item.id, item)}
               onPointerUp={() => setDockPressedId(null)}
               onPointerCancel={() => setDockPressedId(null)}
               onClick={() => {
                 if (dockClickSuppressed.current) return;
+                onIntent?.(item.id, item);
                 if (offset === 0) {
                   triggerLightHaptic();
                   onSelect(item.id, item);

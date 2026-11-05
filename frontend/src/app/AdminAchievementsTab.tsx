@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Award, Edit3, Eye, EyeOff, Gift, Plus, RefreshCw, Save } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { appIconExists, suggestedIconOptions } from '@/lib/iconLibrary';
+import { appIconExists, suggestedIconOptions } from '@/lib/iconLibraryAdmin';
 import { useApp } from './AppContext';
 import type { AchievementCategory, AchievementReward, AchievementRewardType, AchievementTier, AdminAchievement, ShopItem, UserTitle } from '@/lib/types';
 
