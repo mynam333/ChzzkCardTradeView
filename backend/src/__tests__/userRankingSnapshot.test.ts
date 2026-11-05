@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildPostgresUserRankingSnapshotStaging,
   isUserRankingSnapshotFresh,
   readLatestUserRankingSnapshotAt,
   snapshotTimestampMs,
@@ -27,6 +28,41 @@ describe('user ranking snapshot refresh policy', () => {
 });
 
 describe('PostgreSQL user ranking snapshot synchronization', () => {
+  it('aggregates visible cards once and builds only the unique indexes needed for synchronization', async () => {
+    const statements: string[] = [];
+    const tx = {
+      run: vi.fn(async (sql: string) => {
+        statements.push(sql.replace(/\s+/g, ' ').trim());
+        return { changes: 0 };
+      })
+    };
+
+    await buildPostgresUserRankingSnapshotStaging(tx);
+
+    expect(statements).toHaveLength(6);
+    expect(statements.join(' ').match(/FROM user_cards\b/g)).toHaveLength(1);
+    expect(statements[0]).toContain('LIKE user_asset_ranking_cards INCLUDING DEFAULTS');
+    expect(statements[0]).not.toContain('INCLUDING ALL');
+    expect(statements[1]).toContain('uc.is_hidden IS NOT TRUE');
+    expect(statements[1]).toContain('u.banned_until IS NULL OR u.banned_until <= NOW()');
+    expect(statements[1]).toContain('COALESCE(uc.star, 0)');
+    expect(statements[1]).toContain('GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)');
+    expect(statements[2]).toContain('CREATE UNIQUE INDEX');
+    expect(statements[2]).toContain('(user_id, channel_id, star)');
+    expect(statements[3]).toContain('LIKE user_asset_rankings INCLUDING DEFAULTS');
+    expect(statements[3]).not.toContain('INCLUDING ALL');
+    expect(statements[4]).toContain('FROM user_asset_ranking_cards_next rc');
+    expect(statements[4]).not.toContain('FROM user_cards');
+    expect(statements[4]).toContain('SUM(rc.card_count) AS card_count');
+    expect(statements[4]).toContain('rc.card_count * s.base_value * (1 + rc.star * 0.8)');
+    expect(statements[4]).toContain('FROM users u LEFT JOIN CardValues cv ON cv.user_id = u.id');
+    expect(statements[4]).toContain('COALESCE(cv.card_count, 0)');
+    expect(statements[4]).toContain('u.banned_until IS NULL OR u.banned_until <= NOW()');
+    expect(statements[4]).toContain('ROUND(cards_value_raw)::BIGINT');
+    expect(statements[5]).toContain('CREATE UNIQUE INDEX');
+    expect(statements[5]).toContain('(user_id)');
+  });
+
   it('upserts changed rows and deletes only rows missing from staging', async () => {
     const statements: string[] = [];
     const tx = {

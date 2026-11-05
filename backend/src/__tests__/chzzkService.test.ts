@@ -2,13 +2,56 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchChzzkChannelProfile,
   fetchChzzkLiveStatus,
+  fetchChzzkUserProfile,
+  refreshChzzkToken,
   isPlaceholderProfileImageUrl
 } from '../services/chzzkService';
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe('session external lookup deadlines', () => {
+  it('aborts a stalled user profile body', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      signal = init.signal;
+      return { ok: true, json: () => new Promise(() => {}) };
+    }));
+    const request = fetchChzzkUserProfile('owner', 'test-token');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(request).resolves.toBeNull();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('preserves the stored image when the external image service fails', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ code: 200, content: { nickname: 'updated name' } }) })
+      .mockResolvedValueOnce({ ok: false, status: 503 }));
+    await expect(fetchChzzkUserProfile('owner', 'test-token')).resolves.toEqual({ nickname: 'updated name', profileImageUrl: undefined });
+  });
+
+  it('aborts stalled token refresh without clearing tokens as revoked', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubEnv('CHZZK_CLIENT_ID', 'test-id');
+    vi.stubEnv('CHZZK_CLIENT_SECRET', 'test-secret');
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn((_url, init) => {
+      signal = init.signal;
+      return new Promise(() => {});
+    }));
+    const request = refreshChzzkToken('test-refresh-token');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(request).resolves.toBeNull();
+    expect(signal?.aborted).toBe(true);
+    vi.unstubAllEnvs();
+  });
 });
 
 describe('chzzkService profile image validation', () => {

@@ -252,7 +252,7 @@ const refreshChzzkTokenDetailed = async (refreshToken: string): Promise<ChzzkTok
   if (!refreshToken || !clientId || !clientSecret) return { ok: false };
 
   try {
-    const res = await fetch('https://openapi.chzzk.naver.com/auth/v1/token', {
+    const { response: res, body } = await fetchChzzkJson('https://openapi.chzzk.naver.com/auth/v1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
       body: JSON.stringify({
@@ -261,12 +261,11 @@ const refreshChzzkTokenDetailed = async (refreshToken: string): Promise<ChzzkTok
         clientId,
         clientSecret
       })
-    });
+    }, 'OAuth 토큰 갱신');
     if (!res.ok) {
       console.warn(`[ChzzkService] 토큰 갱신 실패 (HTTP ${res.status})`);
       return { ok: false, status: res.status };
     }
-    const body = (await res.json()) as any;
     const content = body.content || body;
     const accessToken = content.accessToken || content.access_token;
     const newRefresh = content.refreshToken || content.refresh_token || refreshToken;
@@ -397,20 +396,19 @@ export const getValidUserAccessToken = async (userId: string): Promise<string | 
 export const fetchChzzkUserProfile = async (
   userId: string,
   accessToken: string
-): Promise<{ nickname: string; profileImageUrl: string | null } | null> => {
+): Promise<{ nickname: string; profileImageUrl: string | null | undefined } | null> => {
   try {
     const profileHeaders = {
       'Authorization': `Bearer ${accessToken}`,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chikapo-App/1.0'
     };
 
-    const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
+    const { response: profileResponse, body: profileData } = await fetchChzzkJson('https://openapi.chzzk.naver.com/open/v1/users/me', {
       headers: profileHeaders
-    });
+    }, '사용자 프로필 조회');
 
     let nickname = '';
     if (profileResponse.ok) {
-      const profileData = (await profileResponse.json()) as any;
       if (profileData.code === 200 && profileData.content) {
         nickname = profileData.content.nickname || '';
       }
@@ -418,15 +416,15 @@ export const fetchChzzkUserProfile = async (
 
     if (!nickname) return null;
 
-    let profileImageUrl: string | null = null;
+    // undefined means the image lookup failed; preserve the stored image in that case.
+    let profileImageUrl: string | null | undefined;
     try {
-      const channelProfileResponse = await fetch(`https://api.chzzk.naver.com/service/v1/channels/${userId}`, {
+      const { response: channelProfileResponse, body: channelData } = await fetchChzzkJson(`https://api.chzzk.naver.com/service/v1/channels/${userId}`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-      });
+      }, '사용자 프로필 이미지 조회');
       if (channelProfileResponse.ok) {
-        const channelData = (await channelProfileResponse.json()) as any;
         if (channelData.code === 200 && channelData.content) {
           profileImageUrl = channelData.content.channelImageUrl || null;
         }

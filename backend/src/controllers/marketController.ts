@@ -15,6 +15,7 @@ import {
   DEFAULT_MARKET_LISTING_LIMIT,
   getMarketListingLimit
 } from '../services/marketListingLimit';
+import { listPendingMarketCardsBySeller } from '../services/marketPendingCardsService';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 const MARKET_LIST_CACHE_TTL_MS = Math.min(5000, Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000)));
@@ -397,6 +398,38 @@ export const listMyListings = async (req: AuthenticatedRequest, res: Response) =
   } catch (err: any) {
     console.error('[MarketController] listMyListings 에러:', err);
     return res.status(500).json({ error: 'ServerError', message: '내 판매 목록을 가져오는 중 오류가 발생했습니다.' });
+  }
+};
+
+/**
+ * 보관함에서 판매 예약/취소 상태를 표시하기 위한 경량 목록입니다.
+ * GET /api/market/my/pending-cards
+ */
+export const listMyPendingCards = async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  }
+
+  try {
+    let listings = await listPendingMarketCardsBySeller(user.id);
+    if (hasExpiredAuctionListing(listings)) {
+      try {
+        await settleExpiredAuctions({ force: true });
+        listings = await listPendingMarketCardsBySeller(user.id);
+      } catch (err: any) {
+        console.warn('[MarketController] 판매 예약 목록 만료 경매 즉시 정리 실패:', err?.message || err);
+      }
+    }
+    setMarketListCacheHeaders(res);
+    return res.json(listings.map((listing) => ({
+      id: listing.id,
+      user_card_id: listing.user_card_id,
+      status: 'PENDING' as const
+    })));
+  } catch (err: any) {
+    console.error('[MarketController] listMyPendingCards 에러:', err);
+    return res.status(500).json({ error: 'ServerError', message: '판매 중인 카드 목록을 가져오는 중 오류가 발생했습니다.' });
   }
 };
 

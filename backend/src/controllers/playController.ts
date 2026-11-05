@@ -15,11 +15,13 @@ import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
 import { syncUserSubscriptionTitles } from '../services/subscriptionTitleService';
+import { createUserSessionEnrichment } from '../services/userSessionEnrichment';
 import { getDbMode, getMysqlDb, getSqliteDb, getSqlDialect } from '../services/db';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { recordAchievementEvent } from '../services/achievementService';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import {
+  buildPostgresUserRankingSnapshotStaging,
   isUserRankingSnapshotFresh,
   readLatestUserRankingSnapshotAt,
   syncPostgresUserRankingSnapshotTables
@@ -267,7 +269,8 @@ const maybeSyncChzzkProfile = async (userId: string, user: any): Promise<void> =
     if (!accessToken) return;
     const profile = await fetchChzzkUserProfile(userId, accessToken);
     if (!profile) return;
-    const { nickname, profileImageUrl } = profile;
+    const { nickname } = profile;
+    const profileImageUrl = profile.profileImageUrl === undefined ? user.avatar_url : profile.profileImageUrl;
     if (user.username !== nickname || user.avatar_url !== profileImageUrl) {
       await userRepository.updateProfile(userId, nickname, profileImageUrl);
       user.username = nickname;
@@ -278,6 +281,15 @@ const maybeSyncChzzkProfile = async (userId: string, user: any): Promise<void> =
     console.warn(`[PlayController] 유저 정보 로그인 동기화 실패 (기존 정보 사용):`, syncErr.message);
   }
 };
+
+const scheduleUserSessionEnrichment = createUserSessionEnrichment(async (userId, user: any) => {
+  const results = await Promise.allSettled([
+    maybeSyncChzzkProfile(userId, user),
+    syncUserSubscriptionTitles(userId)
+  ]);
+  const failure = results.find((result) => result.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
+}, error => console.warn('[UserSession] 프로필 동기화 실패:', error instanceof Error ? error.message : String(error)));
 
 /**
  * 1. 현재 사용자 최신 세션 정보 반환 (포인트 동기화)
@@ -294,11 +306,9 @@ export const getUserMe = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
 
-    // 치지직 프로필/구독 칭호 동기화는 throttle/cache되어 대부분의 호출에서는 외부 요청 없이 반환됩니다.
-    await Promise.all([
-      maybeSyncChzzkProfile(userId, user),
-      syncUserSubscriptionTitles(userId)
-    ]);
+    // 기존 프로필/칭호로 세션을 즉시 제공하고, 외부 서비스 동기화는 별도로 처리합니다.
+    // 포인트와 무료 티켓은 아래에서 계속 최신 DB 값으로 계산합니다.
+    scheduleUserSessionEnrichment(userId, user);
     const [[intervalStr, maxStackStr, drawCostStr], ownedTitles] = await Promise.all([
       Promise.all([
         systemConfigRepository.get('free_draw_interval', '24'),
@@ -811,7 +821,6 @@ export const clearRankingCaches = () => {
 };
 
 export const scheduleUserRankingRefresh = (reason = 'ranking_mutation') => {
-  clearUserRankingCaches();
   userRankingMutationRefreshReasons.add(reason);
   const now = Date.now();
   if (!userRankingMutationRefreshFirstQueuedAt) {
@@ -947,49 +956,7 @@ export const refreshUserRankingSnapshot = async (options: {
         if (isPostgres) {
           await db.transaction(async (tx) => {
             await tx.run(`SET LOCAL statement_timeout = '${USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS}ms'`);
-            await tx.run('CREATE TEMP TABLE user_asset_rankings_next (LIKE user_asset_rankings INCLUDING ALL) ON COMMIT DROP');
-            await tx.run('CREATE TEMP TABLE user_asset_ranking_cards_next (LIKE user_asset_ranking_cards INCLUDING ALL) ON COMMIT DROP');
-            await tx.run(`
-              INSERT INTO user_asset_rankings_next
-                (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
-                 card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
-              WITH CardValues AS (
-                SELECT uc.user_id,
-                       COUNT(uc.id) AS card_count,
-                       COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
-                  FROM user_cards uc
-                  LEFT JOIN streamers s ON s.channel_id = uc.channel_id
-                 WHERE uc.is_hidden IS NOT TRUE
-                 GROUP BY uc.user_id
-              ),
-              UserCardValues AS (
-                SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-                       u.status_message, u.last_seen_at, u.created_at,
-                       COALESCE(cv.card_count, 0) AS card_count,
-                       COALESCE(cv.cards_value_raw, 0) AS cards_value_raw
-                  FROM users u
-                  LEFT JOIN CardValues cv ON cv.user_id = u.id
-                 WHERE u.banned_until IS NULL OR u.banned_until <= NOW()
-              ),
-              RankedUsers AS (
-                SELECT *,
-                       ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
-                       ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
-                  FROM UserCardValues
-              )
-              SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
-                     card_count, ROUND(cards_value_raw)::BIGINT, (point + ROUND(cards_value_raw))::BIGINT, total_rank, cards_rank, NOW()
-                FROM RankedUsers
-            `);
-            await tx.run(`
-              INSERT INTO user_asset_ranking_cards_next (user_id, channel_id, star, card_count)
-              SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
-                FROM user_cards uc
-                JOIN user_asset_rankings_next r
-                  ON r.user_id = uc.user_id
-               WHERE uc.is_hidden IS NOT TRUE
-               GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
-            `);
+            await buildPostgresUserRankingSnapshotStaging(tx);
             await syncPostgresUserRankingSnapshotTables(tx);
           });
         } else {
@@ -1137,7 +1104,10 @@ export const startUserRankingSnapshotScheduler = () => {
     return;
   }
   const run = () => {
-    refreshUserRankingSnapshot({ force: true }).catch((err: any) => {
+    refreshUserRankingSnapshot({
+      force: true,
+      minimumRefreshIntervalMs: USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL
+    }).catch((err: any) => {
       console.warn('[RankingSnapshot] 예약 갱신 실패:', err?.message || err);
     });
   };

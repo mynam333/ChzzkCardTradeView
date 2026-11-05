@@ -113,6 +113,7 @@ import {
 import {
   listActiveListings,
   listMyListings,
+  listMyPendingCards,
   createListing,
   cancelListing,
   hideMyListing,
@@ -575,6 +576,7 @@ router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, acco
 // 오픈마켓 API
 router.get('/market/listings', authMiddleware, listActiveListings);
 router.get('/market/my', authMiddleware, listMyListings);
+router.get('/market/my/pending-cards', authMiddleware, listMyPendingCards);
 router.delete('/market/my/:id', authMiddleware, banCheckMiddleware, hideMyListing);
 router.get('/market/history', authMiddleware, listMarketHistory);
 router.get('/market/watches', authMiddleware, banCheckMiddleware, listMarketWatches);

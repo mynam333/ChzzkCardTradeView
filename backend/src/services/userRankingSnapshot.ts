@@ -6,6 +6,65 @@ type SqlRunner = {
   run: (sql: string, ...args: any[]) => Promise<any>;
 };
 
+/**
+ * PostgreSQL 전용 랭킹 staging을 만듭니다.
+ * 보이는 카드 그룹을 먼저 한 번만 집계하고, 유저별 자산 합계는 그 작은 결과에서 계산합니다.
+ * TEMP 테이블은 bulk load 중 인덱스를 유지하지 않고 적재 후 sync에 필요한 unique index만 만듭니다.
+ */
+export const buildPostgresUserRankingSnapshotStaging = async (tx: SqlRunner): Promise<void> => {
+  await tx.run('CREATE TEMP TABLE user_asset_ranking_cards_next (LIKE user_asset_ranking_cards INCLUDING DEFAULTS) ON COMMIT DROP');
+  await tx.run(`
+    INSERT INTO user_asset_ranking_cards_next (user_id, channel_id, star, card_count)
+    SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
+      FROM user_cards uc
+      JOIN users u ON u.id = uc.user_id
+     WHERE uc.is_hidden IS NOT TRUE
+       AND (u.banned_until IS NULL OR u.banned_until <= NOW())
+     GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
+  `);
+  await tx.run(`
+    CREATE UNIQUE INDEX user_asset_ranking_cards_next_key
+      ON user_asset_ranking_cards_next (user_id, channel_id, star)
+  `);
+
+  await tx.run('CREATE TEMP TABLE user_asset_rankings_next (LIKE user_asset_rankings INCLUDING DEFAULTS) ON COMMIT DROP');
+  await tx.run(`
+    INSERT INTO user_asset_rankings_next
+      (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
+       card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
+    WITH CardValues AS (
+      SELECT rc.user_id,
+             SUM(rc.card_count) AS card_count,
+             COALESCE(SUM(rc.card_count * s.base_value * (1 + rc.star * 0.8)), 0) AS cards_value_raw
+        FROM user_asset_ranking_cards_next rc
+        LEFT JOIN streamers s ON s.channel_id = rc.channel_id
+       GROUP BY rc.user_id
+    ),
+    UserCardValues AS (
+      SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+             u.status_message, u.last_seen_at, u.created_at,
+             COALESCE(cv.card_count, 0) AS card_count,
+             COALESCE(cv.cards_value_raw, 0) AS cards_value_raw
+        FROM users u
+        LEFT JOIN CardValues cv ON cv.user_id = u.id
+       WHERE u.banned_until IS NULL OR u.banned_until <= NOW()
+    ),
+    RankedUsers AS (
+      SELECT *,
+             ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
+             ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
+        FROM UserCardValues
+    )
+    SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
+           card_count, ROUND(cards_value_raw)::BIGINT, (point + ROUND(cards_value_raw))::BIGINT, total_rank, cards_rank, NOW()
+      FROM RankedUsers
+  `);
+  await tx.run(`
+    CREATE UNIQUE INDEX user_asset_rankings_next_key
+      ON user_asset_rankings_next (user_id)
+  `);
+};
+
 export const snapshotTimestampMs = (value: unknown): number | null => {
   if (value == null || value === '') return null;
   const timestamp = value instanceof Date ? value.getTime() : new Date(String(value)).getTime();
