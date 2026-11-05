@@ -125,10 +125,29 @@ export const syncPostgresUserRankingSnapshotTables = async (tx: SqlRunner): Prom
     )
   `);
 
+  // Most card groups are unchanged between snapshots. Updating only changed rows first
+  // avoids probing every staging row through ON CONFLICT on each refresh.
+  await tx.run(`
+    UPDATE user_asset_ranking_cards AS existing
+       SET card_count = next.card_count
+      FROM user_asset_ranking_cards_next AS next
+     WHERE existing.user_id = next.user_id
+       AND existing.channel_id = next.channel_id
+       AND existing.star = next.star
+       AND existing.card_count IS DISTINCT FROM next.card_count
+  `);
+
   await tx.run(`
     INSERT INTO user_asset_ranking_cards AS existing (user_id, channel_id, star, card_count)
-    SELECT user_id, channel_id, star, card_count
-      FROM user_asset_ranking_cards_next
+    SELECT next.user_id, next.channel_id, next.star, next.card_count
+      FROM user_asset_ranking_cards_next AS next
+     WHERE NOT EXISTS (
+       SELECT 1
+         FROM user_asset_ranking_cards AS current
+        WHERE current.user_id = next.user_id
+          AND current.channel_id = next.channel_id
+          AND current.star = next.star
+     )
     ON CONFLICT (user_id, channel_id, star) DO UPDATE SET
       card_count = EXCLUDED.card_count
     WHERE existing.card_count IS DISTINCT FROM EXCLUDED.card_count

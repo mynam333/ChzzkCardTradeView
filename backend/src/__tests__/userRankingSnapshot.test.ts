@@ -63,7 +63,7 @@ describe('PostgreSQL user ranking snapshot synchronization', () => {
     expect(statements[5]).toContain('(user_id)');
   });
 
-  it('upserts changed rows and deletes only rows missing from staging', async () => {
+  it('updates changed card groups, inserts missing groups, and deletes rows absent from staging', async () => {
     const statements: string[] = [];
     const tx = {
       run: vi.fn(async (sql: string) => {
@@ -74,14 +74,21 @@ describe('PostgreSQL user ranking snapshot synchronization', () => {
 
     await syncPostgresUserRankingSnapshotTables(tx);
 
-    expect(statements).toHaveLength(5);
+    expect(statements).toHaveLength(6);
     expect(statements[0]).toContain('ON CONFLICT (user_id) DO UPDATE');
     expect(statements[0]).toContain('IS DISTINCT FROM');
-    expect(statements[1]).toContain('ON CONFLICT (user_id, channel_id, star) DO UPDATE');
-    expect(statements[1]).toContain('existing.card_count IS DISTINCT FROM EXCLUDED.card_count');
-    expect(statements[2]).toContain('DELETE FROM user_asset_ranking_cards AS existing WHERE NOT EXISTS');
-    expect(statements[3]).toContain('DELETE FROM user_asset_rankings AS existing WHERE NOT EXISTS');
-    expect(statements[4]).toContain('UPDATE user_asset_rankings SET snapshot_at = NOW()');
+    expect(statements[1]).toContain('UPDATE user_asset_ranking_cards AS existing');
+    expect(statements[1]).toContain('FROM user_asset_ranking_cards_next AS next');
+    expect(statements[1]).toContain('existing.card_count IS DISTINCT FROM next.card_count');
+    expect(statements[2]).toContain('INSERT INTO user_asset_ranking_cards AS existing');
+    expect(statements[2]).toContain('WHERE NOT EXISTS');
+    expect(statements[2]).toContain('FROM user_asset_ranking_cards AS current');
+    expect(statements[2]).toContain('ON CONFLICT (user_id, channel_id, star) DO UPDATE');
+    expect(statements[2]).toContain('existing.card_count IS DISTINCT FROM EXCLUDED.card_count');
+    // NOT EXISTS deletion also clears the live table when staging is empty.
+    expect(statements[3]).toContain('DELETE FROM user_asset_ranking_cards AS existing WHERE NOT EXISTS');
+    expect(statements[4]).toContain('DELETE FROM user_asset_rankings AS existing WHERE NOT EXISTS');
+    expect(statements[5]).toContain('UPDATE user_asset_rankings SET snapshot_at = NOW()');
     expect(statements).not.toContain('DELETE FROM user_asset_ranking_cards');
     expect(statements).not.toContain('DELETE FROM user_asset_rankings');
   });
