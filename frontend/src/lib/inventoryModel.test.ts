@@ -35,11 +35,11 @@ describe('inventory model indexing', () => {
 
     const model = buildInventoryModel(cards);
 
-    expect(model.groups.map(({ key, count, kind }) => ({ key, count, kind }))).toEqual([
-      { key: 'channel-a#0', count: 2, kind: 'normal' },
-      { key: 'card:3', count: 1, kind: 'cosmetic' },
-      { key: 'card:4', count: 1, kind: 'cosmetic' },
-      { key: 'channel-a#1', count: 1, kind: 'normal' }
+    expect(model.groups.map(({ key, totalCount, count, kind }) => ({ key, totalCount, count, kind }))).toEqual([
+      { key: 'channel-a#0', totalCount: 2, count: 2, kind: 'normal' },
+      { key: 'card:3', totalCount: 1, count: 1, kind: 'cosmetic' },
+      { key: 'card:4', totalCount: 1, count: 1, kind: 'cosmetic' },
+      { key: 'channel-a#1', totalCount: 1, count: 1, kind: 'normal' }
     ]);
     expect(model.getCardByKey(inventorySingleCardKey(3))?.id).toBe(3);
     expect(model.groupKeyByCardId.get(2)).toBe(inventoryCardKey('channel-a', 0));
@@ -72,6 +72,32 @@ describe('inventory model indexing', () => {
     expect(model.getAvailableGroupCards('card:5').map((card) => card.id)).toEqual([5]);
     expect(model.getAvailableGroupCards('card:6')).toEqual([]);
     // 전체 6장 - (잠금 또는 대기 중인 고유 카드 4장) - 예약 1장
+    expect(model.getAvailableCount('channel-a', 0)).toBe(1);
+  });
+
+  it('그룹 대표 카드가 판매 중이어도 다른 physical card를 추가 등록 대상으로 제공한다', () => {
+    const cards = [
+      makeCard(1),
+      makeCard(2),
+      makeCard(3, { is_locked: true }),
+      makeCard(4)
+    ];
+    const model = buildInventoryModel(cards, {
+      pendingCardIds: [1, 3],
+      reservedByGroup: { 'channel-a#0': 1 }
+    });
+    const group = model.getGroup('channel-a#0');
+
+    expect(group).toMatchObject({
+      card: { id: 1 },
+      totalCount: 4,
+      count: 4,
+      pendingMarketCount: 2,
+      lockedCount: 1,
+      reservedCount: 1,
+      availableCount: 1
+    });
+    expect(model.getAvailableGroupCards('channel-a#0').map((card) => card.id)).toEqual([4]);
     expect(model.getAvailableCount('channel-a', 0)).toBe(1);
   });
 
@@ -175,7 +201,7 @@ describe('inventory filtering and stable group sorting', () => {
     });
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ key: 'channel-a#0', count: 1 });
+    expect(result[0]).toMatchObject({ key: 'channel-a#0', totalCount: 2, count: 1 });
     expect(result[0].card.id).toBe(2);
   });
 

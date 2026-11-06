@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useApp } from './AppContext';
 import {
   Search,
@@ -34,7 +34,7 @@ import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
 import { formatMarketPrice, MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
 import { buildInventoryModel, filterAndSortInventoryGroups, getSelectableKeys, type InventorySort } from '@/lib/inventoryModel';
-import { buildInventoryReservations, expandInventoryCards, loadJsonWithDeadline, type InventoryAvailabilityState } from '@/lib/inventoryLoad';
+import { buildInventoryReservations, expandInventoryCards, loadJsonWithDeadline, normalizeInventoryCardIds, normalizePendingMarketCardIds, type InventoryAvailabilityState } from '@/lib/inventoryLoad';
 import {
   clampTradeSelection,
   clearTradeResults,
@@ -177,7 +177,6 @@ const sameStreamerProfile = (current: Streamer | null | undefined, fresh: Stream
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
   const { statuses: liveStatuses, isStreamerLive } = useStreamerLiveStatuses(Boolean(user));
-  const router = useRouter();
   const searchParams = useSearchParams();
   const userId = user?.id;
   const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
@@ -266,6 +265,13 @@ export const GachaTab: React.FC = () => {
     reservedByGroup: reservations.cardsByStar
   }), [inventory, marketPendingCardIds, reservations.cardsByStar]);
   const pendingCardIdSet = React.useMemo(() => new Set(marketPendingCardIds), [marketPendingCardIds]);
+  const pendingMarketSummary = React.useMemo(() => {
+    const types = new Set<string>();
+    for (const card of inventory) {
+      if (pendingCardIdSet.has(card.id)) types.add(cardKey(card.channel_id, card.star ?? 0));
+    }
+    return { cardCount: pendingCardIdSet.size, typeCount: types.size };
+  }, [inventory, pendingCardIdSet]);
   const myTradeCollection = React.useMemo<TradeCardGroup[]>(() => {
     const groups = new Map<string, Omit<TradeCardGroup, 'count' | 'ownedCount'> & { ownedCount: number }>();
     for (const card of inventory) {
@@ -693,8 +699,9 @@ export const GachaTab: React.FC = () => {
   }, [equipCard?.id]);
 
   const applyMarketPending = (data: any[]) => {
-    setMyMarketListings(data);
-    setMarketPendingCardIds(data.filter((listing: any) => listing.status === 'PENDING').map((listing: any) => listing.user_card_id));
+    const pendingIds = normalizePendingMarketCardIds(data);
+    setMyMarketListings(data.map((listing) => ({ ...listing, user_card_id: Number(listing.user_card_id) })));
+    setMarketPendingCardIds(pendingIds);
   };
 
   const getAvailableCount = (channelId: string, star: number) => {
@@ -858,7 +865,7 @@ export const GachaTab: React.FC = () => {
           (signal) => apiFetch('/users/me/cards?format=compact', { signal }),
           { timeoutMs: 20_000, parentSignal: controller.signal }
         );
-        const cards = expandInventoryCards<UserCard>(payload);
+        const cards = normalizeInventoryCardIds(expandInventoryCards<UserCard>(payload));
         if (!isCurrent()) return;
         applyFreshInventory(cards);
         setLoading(false);
@@ -1077,7 +1084,7 @@ export const GachaTab: React.FC = () => {
     setDetailStreamer({ channel_id: channelId });
     const params = new URLSearchParams(window.location.search);
     params.set('streamer', channelId);
-    router.push(`/inventory?${params.toString()}`);
+    window.history.pushState(null, '', `${window.location.pathname}?${params.toString()}`);
   };
 
   const closeStreamerDetail = () => {
@@ -1085,7 +1092,7 @@ export const GachaTab: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     params.delete('streamer');
     const query = params.toString();
-    router.push(query ? `/inventory?${query}` : '/inventory');
+    window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
   };
 
   const shortChannelId = (channelId: string) => (
@@ -2079,10 +2086,15 @@ export const GachaTab: React.FC = () => {
       <section data-tour="inventory-list" className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full sm:w-auto">
-            <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-2.5">
               <h3 className="text-base font-bold flex items-center gap-2">
                 <Layers className="h-4.5 w-4.5 text-primary" /> 나의 카드 보관함 ({inventory.length}장)
               </h3>
+              {pendingMarketSummary.cardCount > 0 && (
+                <span className="shrink-0 rounded-full border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-[10px] font-black text-sky-600 dark:text-sky-300" title="현재 오픈마켓에 등록된 카드 종류와 수량">
+                  마켓 판매 중 {pendingMarketSummary.typeCount}종 · {pendingMarketSummary.cardCount}장
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => setBroadcastMode((prev) => !prev)}
@@ -2282,7 +2294,7 @@ export const GachaTab: React.FC = () => {
 
               <InventoryPagination page={activeInventoryPage} pages={inventoryPages} total={groupedInventory.length} onChange={page => { setInventoryPage(page); setContextMenu(previous => ({ ...previous, open: false })); }} />
               <div ref={inventoryGridRef} data-testid="inventory-grid" className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {visibleInventory.map(({ card, count, star, key, cards: owned, availableCards: actionCards, pendingMarketCount, lockedCount, hiddenCount }) => {
+                {visibleInventory.map(({ card, count, totalCount, star, key, cards: owned, availableCards: actionCards, pendingMarketCount, lockedCount, hiddenCount }) => {
                   const streamer = card.streamer;
                   if (!streamer) return null;
 
@@ -2499,14 +2511,9 @@ export const GachaTab: React.FC = () => {
                           )}
 
                           <div className="flex items-center gap-1">
-                            {pendingMarketCount > 0 && (
-                              <span className="rounded bg-sky-500 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5" title="오픈마켓 판매 중인 수량">
-                                🏪 {pendingMarketCount}
-                              </span>
-                            )}
-                            {(count > 1 || avail < count) && (
-                              <span className={`rounded px-1.5 py-0.5 text-[8.5px] font-extrabold shadow-sm ${avail === 0 ? 'bg-zinc-700 text-zinc-400' : avail < count ? 'bg-amber-500/90 text-black animate-pulse' : 'bg-primary text-primary-foreground'}`}>
-                                {avail}/{count}
+                            {(totalCount > 1 || avail < totalCount) && (
+                              <span className={`rounded px-1.5 py-0.5 text-[8.5px] font-extrabold shadow-sm ${avail === 0 ? 'bg-zinc-700 text-zinc-400' : avail < totalCount ? 'bg-amber-500/90 text-black animate-pulse' : 'bg-primary text-primary-foreground'}`} title={`사용 가능 ${avail}장 / 총 보유 ${totalCount}장`}>
+                                {avail}/{totalCount}
                               </span>
                             )}
                             <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
@@ -2514,6 +2521,13 @@ export const GachaTab: React.FC = () => {
                             </span>
                           </div>
                         </div>
+                        {pendingMarketCount > 0 && (
+                          <div className="mt-1 flex justify-end">
+                            <span className="whitespace-nowrap rounded bg-sky-500 px-2 py-1 text-[10px] font-black text-white shadow-sm" title="오픈마켓 판매 중인 수량">
+                              판매 중 {pendingMarketCount}장
+                            </span>
+                          </div>
+                        )}
 
                         {/* 카드 하단 정보 */}
                         <div className="space-y-1 text-white block mt-auto pointer-events-auto">
@@ -2961,6 +2975,7 @@ export const GachaTab: React.FC = () => {
         const menuCard = contextMenu.card;
         const owned = menuCard ? getCardGroup(menuCard) : inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
         const pendingCard = owned.find(c => pendingCardIdSet.has(c.id));
+        const pendingMarketCount = owned.filter(c => pendingCardIdSet.has(c.id)).length;
         const lockedCard = owned.find(c => c.is_locked);
         const allHidden = owned.length > 0 && owned.every(c => c.is_hidden);
         
@@ -3124,7 +3139,7 @@ export const GachaTab: React.FC = () => {
                 }}
                 className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
               >
-                🏪 마켓 판매 등록
+                🏪 {pendingMarketCount > 0 ? '마켓 추가 판매 등록' : '마켓 판매 등록'}
               </button>
             )}
 

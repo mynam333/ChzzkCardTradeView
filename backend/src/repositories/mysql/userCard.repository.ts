@@ -301,7 +301,7 @@ export class MysqlUserCardRepository implements IUserCardRepository {
 
   private mapCardRow(row: any): any {
     return {
-      id: row.id,
+      id: Number(row.id),
       user_id: row.user_id,
       channel_id: row.channel_id,
       serial_number: row.serial_number,

@@ -27,6 +27,8 @@ export interface InventoryGroup<Card extends InventoryCard = InventoryCard> {
   kind: InventoryGroupKind;
   card: Card;
   cards: Card[];
+  /** 검색/방송 필터와 무관한 실제 보유 수량입니다. */
+  totalCount: number;
   count: number;
   star: number;
   originalIndex: number;
@@ -196,6 +198,7 @@ export function buildInventoryModel<Card extends InventoryCard>(
         kind,
         card,
         cards: [],
+        totalCount: 0,
         count: 0,
         star,
         originalIndex: groups.length,
@@ -211,6 +214,7 @@ export function buildInventoryModel<Card extends InventoryCard>(
     }
 
     group.cards.push(card);
+    group.totalCount += 1;
     group.count += 1;
     if (card.is_locked) group.lockedCount += 1;
     if (card.is_hidden) group.hiddenCount += 1;

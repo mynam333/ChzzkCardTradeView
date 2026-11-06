@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compactUserCards } from '../../../backend/src/services/userCardsCompactService.ts';
-import { buildInventoryReservations, expandInventoryCards, loadJsonWithDeadline } from './inventoryLoad.ts';
+import { buildInventoryReservations, expandInventoryCards, loadJsonWithDeadline, normalizeInventoryCardIds, normalizePendingMarketCardIds } from './inventoryLoad.ts';
 
 test('inventory JSON deadline covers the response body read', async () => {
   await assert.rejects(
@@ -110,6 +110,24 @@ test('compact inventory expansion is lossless and reuses table objects', () => {
 test('legacy inventory arrays pass through unchanged', () => {
   const legacy = [{ id: 1, streamer: { channel_id: 'alpha' } }];
   assert.strictEqual(expandInventoryCards(legacy), legacy);
+});
+
+test('inventory card ids normalize PostgreSQL BIGINT strings before pending-card identity checks', () => {
+  const normalized = normalizeInventoryCardIds([{ id: '9001', channel_id: 'alpha' }, { id: 9002, channel_id: 'beta' }]);
+  assert.deepEqual(normalized.map((card) => card.id), [9001, 9002]);
+  assert.equal(new Set([9001]).has(normalized[0].id), true);
+  assert.throws(() => normalizeInventoryCardIds([{ id: 'not-an-id' }]), /Invalid inventory card id/);
+  assert.throws(() => normalizeInventoryCardIds([{ id: String(Number.MAX_SAFE_INTEGER + 1) }]), /Invalid inventory card id/);
+});
+
+test('pending market card ids normalize and deduplicate before availability matching', () => {
+  assert.deepEqual(normalizePendingMarketCardIds([
+    { status: 'PENDING', user_card_id: 9001 },
+    { status: 'PENDING', user_card_id: '9001' },
+    { status: 'SOLD', user_card_id: 9002 }
+  ]), [9001]);
+  assert.throws(() => normalizePendingMarketCardIds([{ status: 'PENDING', user_card_id: 0 }]), /Invalid pending market card id/);
+  assert.throws(() => normalizePendingMarketCardIds([{ status: 'PENDING', user_card_id: '-3' }]), /Invalid pending market card id/);
 });
 
 test('compact inventory rejects invalid references instead of exposing partial cards', () => {

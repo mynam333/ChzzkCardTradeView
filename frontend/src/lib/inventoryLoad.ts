@@ -111,6 +111,26 @@ export const expandInventoryCards = <T extends object>(payload: unknown): T[] =>
   });
 };
 
+/** PostgreSQL BIGINT values can cross the JSON boundary as strings; UI identity sets require one numeric type. */
+export const normalizeInventoryCardIds = <T extends { id: unknown }>(cards: readonly T[]) => cards.map((card) => {
+  const id = Number(card.id);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new TypeError('Invalid inventory card id');
+  return typeof card.id === 'number' ? card as T & { id: number } : { ...card, id };
+});
+
+export const normalizePendingMarketCardIds = (
+  listings: readonly { status?: unknown; user_card_id?: unknown }[]
+) => {
+  const ids = new Set<number>();
+  for (const listing of listings) {
+    if (listing.status !== 'PENDING') continue;
+    const id = Number(listing.user_card_id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new TypeError('Invalid pending market card id');
+    ids.add(id);
+  }
+  return Array.from(ids);
+};
+
 type TradeOffer = {
   cards?: Array<{ channel_id?: string; star?: number | null; count?: number }>;
   point?: number;
