@@ -26,6 +26,7 @@ import {
   readLatestUserRankingSnapshotAt,
   syncPostgresUserRankingSnapshotTables
 } from '../services/userRankingSnapshot';
+import { compactUserCards } from '../services/userCardsCompactService';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -1487,7 +1488,7 @@ export const getUserCards = async (req: Request, res: Response) => {
   try {
     const cards = await findUserCardsCoalesced(userId);
     res.set('Cache-Control', 'private, no-store');
-    return res.status(200).json(cards);
+    return res.status(200).json(req.query?.format === 'compact' ? compactUserCards(cards) : cards);
   } catch (err: any) {
     console.error('[PlayController] getUserCards 에러:', err);
     if (isDbStatementTimeout(err)) {

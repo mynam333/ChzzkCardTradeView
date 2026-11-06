@@ -34,6 +34,7 @@ import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
 import { formatMarketPrice, MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
 import { buildInventoryModel, filterAndSortInventoryGroups, getSelectableKeys, type InventorySort } from '@/lib/inventoryModel';
+import { buildInventoryReservations, expandInventoryCards, loadJsonWithDeadline, type InventoryAvailabilityState } from '@/lib/inventoryLoad';
 import {
   clampTradeSelection,
   clearTradeResults,
@@ -162,6 +163,21 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
   };
 };
 
+const sameStreamerProfile = (current: Streamer | null | undefined, fresh: Streamer) => {
+  if (!current) return false;
+  const currentImages = current.custom_images || [];
+  const freshImages = fresh.custom_images || [];
+  return current.name === fresh.name &&
+    current.logo_url === fresh.logo_url &&
+    current.custom_image_url === fresh.custom_image_url &&
+    current.base_value === fresh.base_value &&
+    current.follower_count === fresh.follower_count &&
+    current.is_active === fresh.is_active &&
+    current.serial_number === fresh.serial_number &&
+    currentImages.length === freshImages.length &&
+    currentImages.every((image, index) => image === freshImages[index]);
+};
+
 
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
@@ -172,17 +188,26 @@ export const GachaTab: React.FC = () => {
   const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
   const broadcastModeLoadedKeyRef = React.useRef<string | null>(null);
   const skipNextBroadcastModeSaveRef = React.useRef(false);
-  const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
   const previousLiveStatusesRef = React.useRef<Readonly<Record<string, boolean>> | null>(null);
   const [broadcastMode, setBroadcastMode] = useState(false);
   // 코스메틱 장착
   const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
+  const [myCosmeticsLoading, setMyCosmeticsLoading] = useState(false);
+  const [myCosmeticsError, setMyCosmeticsError] = useState(false);
   const [equipCard, setEquipCard] = useState<UserCard | null>(null);
 
   // 이미지 신고 모달 (세부 상태는 ReportCardModal 컴포넌트가 자체 관리)
   const [reportCard, setReportCard] = useState<UserCard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [inventoryLoadError, setInventoryLoadError] = useState<string | null>(null);
+  const [availabilityState, setAvailabilityState] = useState<InventoryAvailabilityState>('loading');
+  const inventoryLoadRequestRef = React.useRef(0);
+  const inventoryLoadControllerRef = React.useRef<AbortController | null>(null);
+  const inventoryUserIdRef = React.useRef(userId);
+  const inventoryOwnerRef = React.useRef<string | undefined>(undefined);
+  const activeTradesRequestRef = React.useRef(0);
+  inventoryUserIdRef.current = userId;
   const [searchQuery, setSearchQuery] = useState('');
 
   // 1:1 교환 모달 상태
@@ -350,6 +375,21 @@ export const GachaTab: React.FC = () => {
   const setAlertModal = (a: { open?: boolean; title?: string; message?: string; type?: 'success' | 'error' | 'warning' | 'info' }) => {
     if (a?.message) showAlert(a.title || '', a.message, a.type || 'info');
   };
+  const availabilityReady = availabilityState === 'ready' && !loading && !inventoryLoadError;
+  const requireAvailabilityReady = () => {
+    if (availabilityReady) return true;
+    const readinessFailed = Boolean(inventoryLoadError) || availabilityState === 'error';
+    showAlert(
+      readinessFailed ? '정보 확인 실패' : '정보 확인 중',
+      inventoryLoadError
+        ? '보유 카드 목록을 다시 불러온 뒤 시도해 주세요.'
+        : availabilityState === 'error'
+          ? '판매·교환 예약 정보를 다시 불러온 뒤 시도해 주세요.'
+          : '판매·교환 예약 정보를 확인하고 있습니다. 잠시만 기다려 주세요.',
+      readinessFailed ? 'warning' : 'info'
+    );
+    return false;
+  };
 
   // 카드 정렬 및 필터링 상태 추가
   const [sortBy, setSortBy] = useState<InventorySort>('acquired-desc');
@@ -421,31 +461,22 @@ export const GachaTab: React.FC = () => {
 
   const applyFreshInventory = React.useCallback((cards: UserCard[]) => {
     setInventory(cards);
-
-    const freshProfiles = new Map<string, Streamer>();
-    for (const card of cards) {
-      if (card.streamer) freshProfiles.set(card.channel_id, card.streamer);
-    }
-    if (freshProfiles.size > 0) {
-      setStreamers((current) => current.map((streamer) => {
-        const fresh = freshProfiles.get(streamer.channel_id);
-        return fresh ? { ...streamer, ...fresh } : streamer;
-      }));
-    }
   }, []);
 
   const applyFreshStreamerProfiles = React.useCallback((profiles: Streamer[]) => {
     const profilesByChannel = new Map(profiles.map((profile) => [profile.channel_id, profile]));
     if (profilesByChannel.size === 0) return;
 
-    setInventory((current) => current.map((card) => {
-      const fresh = profilesByChannel.get(card.channel_id);
-      return fresh ? { ...card, streamer: { ...(card.streamer || {} as Streamer), ...fresh } } : card;
-    }));
-    setStreamers((current) => current.map((streamer) => {
-      const fresh = profilesByChannel.get(streamer.channel_id);
-      return fresh ? { ...streamer, ...fresh } : streamer;
-    }));
+    setInventory((current) => {
+      let changed = false;
+      const next = current.map((card) => {
+        const fresh = profilesByChannel.get(card.channel_id);
+        if (!fresh || sameStreamerProfile(card.streamer, fresh)) return card;
+        changed = true;
+        return { ...card, streamer: { ...(card.streamer || {} as Streamer), ...fresh } };
+      });
+      return changed ? next : current;
+    });
   }, []);
 
   const refreshStreamerCardProfiles = React.useCallback(async () => {
@@ -554,12 +585,53 @@ export const GachaTab: React.FC = () => {
   }, [searchParams]);
 
   useEffect(() => {
-    if (user) {
-      fetchStreamers();
-      fetchInventory();
-      fetchActiveTrades();
-      fetchMyCosmetics();
+    if (!userId) {
+      inventoryLoadControllerRef.current?.abort();
+      inventoryLoadRequestRef.current += 1;
+      activeTradesRequestRef.current += 1;
+      setInventory([]);
+      setMarketPendingCardIds([]);
+      setMyMarketListings([]);
+      setActiveTrades([]);
+      setReservations({ cards: {}, cardsByStar: {}, points: 0 });
+      inventoryOwnerRef.current = undefined;
+      setLoading(false);
+      setAvailabilityState('loading');
+      return;
     }
+    if (inventoryOwnerRef.current !== userId) {
+      inventoryOwnerRef.current = userId;
+      setInventory([]);
+      setMarketPendingCardIds([]);
+      setMyMarketListings([]);
+      setActiveTrades([]);
+      setReservations({ cards: {}, cardsByStar: {}, points: 0 });
+      setSelectedCardKeys([]);
+      setSelectionMode(false);
+      setTradeModalOpen(false);
+      setInventoryLoadError(null);
+      setEquipCard(null);
+      setFuseModal(null);
+      setFuseMaterials({});
+      setMarketRegisterCard(null);
+      setSellModalOpen(false);
+      setSellConfirmOpen(false);
+      setSellQuantity(1);
+      setSellingMaxCount(0);
+      setSellingStreamer(null);
+      setSellingStar(0);
+      setBulkSellModalOpen(false);
+      setBulkSellConfirmOpen(false);
+      setBulkSellQuantities({});
+      setContextMenu({ x: 0, y: 0, open: false, channel_id: '', star: 0, card: null });
+      setBulkContextMenu({ x: 0, y: 0, open: false, keys: [] });
+    }
+    void fetchInventory({ showLoading: true });
+    return () => {
+      inventoryLoadControllerRef.current?.abort();
+      inventoryLoadRequestRef.current += 1;
+      activeTradesRequestRef.current += 1;
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -620,49 +692,14 @@ export const GachaTab: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [hasLiveOwnedCard, refreshStreamerCardProfiles, userId]);
 
-  // 진행 중 거래의 예약 카드/포인트 집계
-  useEffect(() => {
-    if (!user) return;
-    const cards: Record<string, number> = {};
-    const cardsByStar: Record<string, number> = {};
-    let points = 0;
-
-    const reserve = (offer: any) => {
-      if (!offer) return;
-      for (const c of offer.cards || []) {
-        const key = c.channel_id;
-        const compKey = `${c.channel_id}#${c.star ?? 0}`;
-        cards[key] = (cards[key] || 0) + c.count;
-        cardsByStar[compKey] = (cardsByStar[compKey] || 0) + c.count;
-      }
-      points += offer.point || 0;
-    };
-
-    for (const t of activeTrades) {
-      if (t.sender_id === user.id) reserve(t.sender_offer);
-      if (t.receiver_id === user.id && t.status === 'CONFIRMED') reserve(t.receiver_offer);
-    }
-    setReservations({ cards, cardsByStar, points });
-  }, [activeTrades, user?.id]);
-
   // 장착 모달을 열 때마다 보유 코스메틱을 최신화 (상점 구매 후 등 상태 불일치로 "미보유" 오류 방지)
   useEffect(() => {
     if (equipCard) fetchMyCosmetics();
   }, [equipCard?.id]);
 
-  const fetchMarketPending = async () => {
-    if (!isAuthed()) return;
-    try {
-      const res = await apiFetch('/market/my/pending-cards');
-      if (res.ok) {
-        const data = await res.json();
-        setMyMarketListings(data);
-        const pendingIds = data.filter((l: any) => l.status === 'PENDING').map((l: any) => l.user_card_id);
-        setMarketPendingCardIds(pendingIds);
-      }
-    } catch (e) {
-      console.error('마켓 판매 중인 목록 로드 실패:', e);
-    }
+  const applyMarketPending = (data: any[]) => {
+    setMyMarketListings(data);
+    setMarketPendingCardIds(data.filter((listing: any) => listing.status === 'PENDING').map((listing: any) => listing.user_card_id));
   };
 
   const getAvailableCount = (channelId: string, star: number) => {
@@ -694,6 +731,7 @@ export const GachaTab: React.FC = () => {
     FUSE_STARS.some((materialStar) => getFuseMaterialMax(channelId, baseStar, materialStar) > 0);
 
   const openFuseModal = (card: UserCard, streamer: Streamer, star: number) => {
+    if (!requireAvailabilityReady()) return;
     if (card.is_locked) {
       showAlert('작업 불가', '잠금된 카드는 한계돌파 대상이 될 수 없습니다.', 'warning');
       return;
@@ -721,14 +759,24 @@ export const GachaTab: React.FC = () => {
   };
 
   const fetchMyCosmetics = async () => {
+    setMyCosmeticsLoading(true);
+    setMyCosmeticsError(false);
     try {
       const res = await apiFetch('/shop/inventory');
-      if (res.ok) setMyCosmetics(await res.json());
-    } catch { /* noop */ }
+      if (!res.ok) throw new Error(`Cosmetic inventory failed: ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new TypeError('Invalid cosmetic inventory');
+      setMyCosmetics(data);
+    } catch {
+      setMyCosmeticsError(true);
+    } finally {
+      setMyCosmeticsLoading(false);
+    }
   };
 
   // 카드에 코스메틱 장착
   const handleEquip = async (cardId: number, itemId: number) => {
+    if (!requireAvailabilityReady()) return;
     try {
       const res = await apiFetch(`/cards/${cardId}/equip`, { method: 'POST', body: JSON.stringify({ item_id: itemId }) });
       const data = await res.json();
@@ -741,6 +789,7 @@ export const GachaTab: React.FC = () => {
 
   // 카드에서 코스메틱 해제(반환)
   const handleUnequip = async (cardId: number, type: 'border' | 'name_effect') => {
+    if (!requireAvailabilityReady()) return;
     try {
       const res = await apiFetch(`/cards/${cardId}/unequip`, { method: 'POST', body: JSON.stringify({ type }) });
       const data = await res.json();
@@ -792,38 +841,71 @@ export const GachaTab: React.FC = () => {
     );
   }
 
-  const fetchStreamers = async () => {
-    try {
-      const res = await apiFetch('/streamers');
-      if (res.ok) {
-        const data = await res.json();
-        setStreamers(data);
-      }
-    } catch (e) {
-      console.error('스트리머 목록 로드 실패:', e);
-    }
-  };
+  const fetchInventory = async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (!isAuthed() || !userId) return;
 
-  const fetchInventory = async () => {
-    if (!isAuthed()) return;
-    try {
-      // API 병렬 호출을 적용하여 보관함 로딩 지연을 최소화합니다.
-      const [res] = await Promise.all([
-        apiFetch('/users/me/cards'),
-        fetchMarketPending()
-      ]);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) applyFreshInventory(data);
+    inventoryLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    inventoryLoadControllerRef.current = controller;
+    const requestId = ++inventoryLoadRequestRef.current;
+    const requestUserId = userId;
+    const isCurrent = () => !controller.signal.aborted
+      && inventoryLoadRequestRef.current === requestId
+      && inventoryUserIdRef.current === requestUserId;
+
+    if (showLoading) setLoading(true);
+    setInventoryLoadError(null);
+    setAvailabilityState('loading');
+
+    const cardsTask = (async () => {
+      try {
+        const payload = await loadJsonWithDeadline<unknown>(
+          (signal) => apiFetch('/users/me/cards?format=compact', { signal }),
+          { timeoutMs: 20_000, parentSignal: controller.signal }
+        );
+        const cards = expandInventoryCards<UserCard>(payload);
+        if (!isCurrent()) return;
+        applyFreshInventory(cards);
+        setLoading(false);
+      } catch (error) {
+        if (!isCurrent()) return;
+        console.error('인벤토리 조회 실패:', error);
+        setInventoryLoadError('보유 카드 목록을 불러오지 못했습니다. 다시 시도해 주세요.');
+        setLoading(false);
       }
-    } catch (e) {
-      console.error('인벤토리 조회 실패:', e);
-    } finally {
-      setLoading(false);
-    }
+    })();
+
+    const availabilityTask = (async () => {
+      try {
+        const [pending, trades] = await Promise.all([
+          loadJsonWithDeadline<unknown>(
+            (signal) => apiFetch('/market/my/pending-cards', { signal }),
+            { timeoutMs: 12_000, parentSignal: controller.signal }
+          ),
+          loadJsonWithDeadline<unknown>(
+            (signal) => apiFetch('/trades/active', { signal }),
+            { timeoutMs: 12_000, parentSignal: controller.signal }
+          )
+        ]);
+        if (!Array.isArray(pending) || !Array.isArray(trades)) throw new TypeError('Invalid availability response');
+        if (!isCurrent()) return;
+        applyMarketPending(pending);
+        setActiveTrades(trades);
+        setReservations(buildInventoryReservations(trades, requestUserId));
+        setAvailabilityState('ready');
+      } catch (error) {
+        if (!isCurrent()) return;
+        console.error('카드 예약 정보 조회 실패:', error);
+        setAvailabilityState('error');
+      }
+    })();
+
+    await Promise.allSettled([cardsTask, availabilityTask]);
+    if (isCurrent()) inventoryLoadControllerRef.current = null;
   };
 
   const handleMarketCancel = async (cardId: number) => {
+    if (!requireAvailabilityReady()) return;
     const listing = myMarketListings.find(l => l.user_card_id === cardId && l.status === 'PENDING');
     if (!listing) return;
     setMarketCancelBusy(true);
@@ -845,6 +927,7 @@ export const GachaTab: React.FC = () => {
   };
   const handleMarketRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!requireAvailabilityReady()) return;
     if (!marketRegisterCard) return;
     if (marketRegisterCard.is_locked) {
       showAlert('등록 실패', '잠금된 카드는 오픈마켓에 등록할 수 없습니다.', 'warning');
@@ -909,6 +992,7 @@ export const GachaTab: React.FC = () => {
   // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
 
   const handleOpenTrade = () => {
+    if (!requireAvailabilityReady()) return;
     resetTradeForm();
     setTradeModalOpen(true);
   };
@@ -956,13 +1040,24 @@ export const GachaTab: React.FC = () => {
 
   // 진행 중(보낸/받은) 교환 목록 조회
   const fetchActiveTrades = async () => {
+    const requestId = ++activeTradesRequestRef.current;
+    const requestUserId = userId;
+    if (!requestUserId) return;
+    setAvailabilityState('loading');
     try {
-      const res = await apiFetch('/trades/active');
-      if (res.ok) {
-        setActiveTrades(await res.json());
-      }
+      const trades = await loadJsonWithDeadline<unknown>(
+        (signal) => apiFetch('/trades/active', { signal }),
+        { timeoutMs: 12_000 }
+      );
+      if (!Array.isArray(trades)) throw new TypeError('Invalid active trades response');
+      if (requestId !== activeTradesRequestRef.current || inventoryUserIdRef.current !== requestUserId) return;
+      setActiveTrades(trades);
+      setReservations(buildInventoryReservations(trades, requestUserId));
+      setAvailabilityState('ready');
     } catch (e) {
+      if (requestId !== activeTradesRequestRef.current || inventoryUserIdRef.current !== requestUserId) return;
       console.error('교환 목록 조회 실패:', e);
+      setAvailabilityState('error');
     }
   };
 
@@ -1004,9 +1099,6 @@ export const GachaTab: React.FC = () => {
 
   const tradeStreamerName = (channelId: string, serverName?: string | null) => {
     if (serverName) return serverName;
-
-    const fromStreamers = streamers.find((s) => s.channel_id === channelId);
-    if (fromStreamers?.name) return fromStreamers.name;
 
     const fromInventory = inventory.find((card) => card.channel_id === channelId);
     if (fromInventory?.streamer?.name) return fromInventory.streamer.name;
@@ -1106,6 +1198,7 @@ export const GachaTab: React.FC = () => {
   };
 
   const executeTrade = async () => {
+    if (!requireAvailabilityReady()) return;
     if (!selectedReceiver) {
       showAlert('상대 지정 필요', '교환할 상대를 검색해서 선택해 주세요.', 'warning');
       return;
@@ -1154,6 +1247,7 @@ export const GachaTab: React.FC = () => {
 
   // 교환 1단계: 수신자가 조건에 동의 (PENDING → CONFIRMED)
   const handleConfirmTrade = async (tradeId: number, withCosmetics = false) => {
+    if (!requireAvailabilityReady()) return;
     try {
       const res = await apiFetch(`/trades/${tradeId}/confirm`, {
         method: 'POST',
@@ -1169,12 +1263,12 @@ export const GachaTab: React.FC = () => {
 
   // 교환 2단계: 제안자가 최종 승인하여 체결 (CONFIRMED → ACCEPTED)
   const handleFinalizeTrade = async (tradeId: number) => {
+    if (!requireAvailabilityReady()) return;
     try {
       const res = await apiFetch(`/trades/${tradeId}/finalize`, { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         showAlert('교환 체결', data.message || '교환이 체결되었습니다.', 'success');
-        fetchActiveTrades();
         fetchTradeHistory();
         fetchInventory();
         refreshUserData();
@@ -1189,6 +1283,7 @@ export const GachaTab: React.FC = () => {
 
   // 교환 거절(받은) / 취소(보낸)
   const handleRejectTrade = async (tradeId: number, reason?: string) => {
+    if (!requireAvailabilityReady()) return;
     const trimmedReason = (reason || '').trim();
     if (Array.from(trimmedReason).length > 30) {
       showAlert('입력 확인', '거절 사유는 30자 이내로 입력해 주세요.', 'warning');
@@ -1230,6 +1325,7 @@ export const GachaTab: React.FC = () => {
 
   // 카드 한계돌파 (선택한 같은 스트리머 카드들을 재료로 소모)
   const handleFuse = async (channelId: string, star: number, materials?: FuseMaterial[]) => {
+    if (!requireAvailabilityReady()) return;
     setFuseBusy(true);
     try {
       const body: any = { channel_id: channelId, star };
@@ -1271,6 +1367,7 @@ export const GachaTab: React.FC = () => {
 
   // 단일 카드 판매 실행
   const executeSell = async () => {
+    if (!requireAvailabilityReady()) return;
     if (!sellingStreamer) return;
     try {
       const res = await apiFetch('/cards/sell', {
@@ -1311,6 +1408,7 @@ export const GachaTab: React.FC = () => {
 
   // 일괄 카드 판매 실행
   const executeBulkSell = async () => {
+    if (!requireAvailabilityReady()) return;
     const items = Object.entries(bulkSellQuantities)
       .filter(([key]) => !isSingleCardKey(key))
       .map(([key, count]) => ({ ...parseCardKey(key), count }))
@@ -1397,6 +1495,7 @@ export const GachaTab: React.FC = () => {
   };
 
   const handleToggleLocked = async (card: UserCard, locked = !card.is_locked) => {
+    if (!requireAvailabilityReady()) return;
     try {
       const res = await apiFetch(`/cards/${card.id}/lock`, {
         method: 'PATCH',
@@ -1436,6 +1535,7 @@ export const GachaTab: React.FC = () => {
     setting: 'favorite' | 'hidden' | 'locked',
     failureMessage: string,
   ) => {
+    if (setting === 'locked' && !requireAvailabilityReady()) return;
     if (bulkSettingsBusyRef.current) return;
     if (cards.length === 0) {
       toast('선택된 카드가 없습니다.');
@@ -2018,7 +2118,9 @@ export const GachaTab: React.FC = () => {
             <div className="flex items-center gap-2 sm:hidden">
               <button
                 onClick={handleOpenTrade}
-                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 flex items-center gap-1"
+                disabled={!availabilityReady}
+                title={!availabilityReady ? '예약 정보를 확인한 뒤 이용할 수 있습니다.' : undefined}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ArrowRightLeft className="h-3.5 w-3.5" /> 1:1 교환
               </button>
@@ -2087,7 +2189,9 @@ export const GachaTab: React.FC = () => {
             <button
               data-tour="inventory-trade-actions"
               onClick={handleOpenTrade}
-              className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm"
+              disabled={!availabilityReady}
+              title={!availabilityReady ? '예약 정보를 확인한 뒤 이용할 수 있습니다.' : undefined}
+              className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ArrowRightLeft className="h-3.5 w-3.5" /> 교환 제안
             </button>
@@ -2102,11 +2206,32 @@ export const GachaTab: React.FC = () => {
         </div>
 
         {bulkSettingsProgress && <p role="status" className="rounded-xl bg-primary/10 p-3 text-xs font-bold text-primary">카드 설정 적용 중 {bulkSettingsProgress.completed.toLocaleString()} / {bulkSettingsProgress.total.toLocaleString()}장</p>}
+        {!loading && (inventoryLoadError || availabilityState !== 'ready') && (
+          <div role="status" className={`flex flex-col gap-2 rounded-xl border p-3 text-xs sm:flex-row sm:items-center sm:justify-between ${inventoryLoadError || availabilityState === 'error' ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'}`}>
+            <p className="font-bold">
+              {inventoryLoadError
+                ? inventoryLoadError
+                : availabilityState === 'error'
+                  ? '판매·교환 예약 정보를 불러오지 못했습니다. 변경 작업은 안전을 위해 잠시 비활성화됩니다.'
+                  : '카드는 먼저 표시했습니다. 판매·교환 예약 정보를 확인하는 동안 변경 작업은 잠시 비활성화됩니다.'}
+            </p>
+            {(inventoryLoadError || availabilityState === 'error') && (
+              <button type="button" onClick={() => void fetchInventory({ showLoading: inventory.length === 0 })} className="shrink-0 rounded-lg bg-card px-3 py-1.5 font-black text-foreground shadow-sm ring-1 ring-border hover:bg-secondary">
+                다시 시도
+              </button>
+            )}
+          </div>
+        )}
         {/* 보관함 카드 그리드 (로딩 중 상태 추가하여 빈 안내 문구 오노출 해결) */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
             <p className="text-xs text-muted-foreground">보유 카드 목록을 불러오는 중입니다...</p>
+          </div>
+        ) : inventoryLoadError && inventory.length === 0 ? (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 py-12 text-center text-xs text-muted-foreground">
+            <p>{inventoryLoadError}</p>
+            <button type="button" onClick={() => void fetchInventory({ showLoading: true })} className="mt-3 rounded-lg bg-primary px-4 py-2 font-bold text-primary-foreground">다시 시도</button>
           </div>
         ) : groupedInventory.length === 0 ? (
           <div className="rounded-2xl border border-border/80 border-dashed py-12 text-center text-xs text-muted-foreground">
@@ -3155,8 +3280,19 @@ export const GachaTab: React.FC = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-3">
-                {renderSlot('border', '테두리', live.border, borders)}
-                {renderSlot('name_effect', '이름 이펙트', live.name_effect, effects)}
+                {myCosmeticsLoading ? (
+                  <p role="status" className="rounded-xl bg-secondary/30 p-4 text-center text-xs font-bold text-muted-foreground">보유 코스메틱을 불러오는 중입니다...</p>
+                ) : myCosmeticsError ? (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-center text-xs text-muted-foreground">
+                    <p>보유 코스메틱을 불러오지 못했습니다.</p>
+                    <button type="button" onClick={() => void fetchMyCosmetics()} className="mt-2 rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">다시 시도</button>
+                  </div>
+                ) : (
+                  <>
+                    {renderSlot('border', '테두리', live.border, borders)}
+                    {renderSlot('name_effect', '이름 이펙트', live.name_effect, effects)}
+                  </>
+                )}
               </div>
             </div>
           </div>

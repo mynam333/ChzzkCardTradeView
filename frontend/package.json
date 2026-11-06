@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:cosmetics": "vitest run src/lib/cosmetics.test.ts src/lib/cosmeticFrameLayers.test.ts src/app/CosmeticFrame.test.tsx",
-    "test:inventory": "vitest run src/lib/inventoryModel.test.ts && node --experimental-strip-types --test src/lib/tradeSelection.test.mjs",
+    "test:inventory": "vitest run src/lib/inventoryModel.test.ts && node --experimental-strip-types --test src/lib/tradeSelection.test.mjs src/lib/inventoryLoad.test.mjs",
     "test:arena-assets": "node --experimental-strip-types --test src/lib/arenaAssetUrl.test.mjs",
     "test:arena-card-editor": "node --experimental-strip-types --test src/lib/arenaCardEditor.test.mjs",
     "test:arena-cosmetics": "node --experimental-strip-types --test src/lib/realtimeTopics.test.mjs src/app/arena/arenaCosmeticState.test.mjs",
