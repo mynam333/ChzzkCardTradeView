@@ -165,17 +165,12 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
 
 const sameStreamerProfile = (current: Streamer | null | undefined, fresh: Streamer) => {
   if (!current) return false;
-  const currentImages = current.custom_images || [];
-  const freshImages = fresh.custom_images || [];
-  return current.name === fresh.name &&
-    current.logo_url === fresh.logo_url &&
-    current.custom_image_url === fresh.custom_image_url &&
-    current.base_value === fresh.base_value &&
-    current.follower_count === fresh.follower_count &&
-    current.is_active === fresh.is_active &&
-    current.serial_number === fresh.serial_number &&
-    currentImages.length === freshImages.length &&
-    currentImages.every((image, index) => image === freshImages[index]);
+  return Object.entries(fresh).every(([key, value]) => {
+    const previous = current[key as keyof Streamer];
+    return Array.isArray(value)
+      ? Array.isArray(previous) && value.length === previous.length && value.every((item, index) => item === previous[index])
+      : previous === value;
+  });
 };
 
 
