@@ -2,6 +2,7 @@ export type ActionCard = { name: string; image_url: string; channel_id: string }
 export type ActionView = {
   revision: number; server_now: number; server_received_at?: number; input_grace_ms?: number;
   cards: ActionCard[]; current_card: number | null; upcoming_cards?: number[]; target_count?: number; sequence: number[];
+  sequence_timing?: { step_ms: number; visible_ms: number } | null;
   frames: Array<{ start: number; duration: number; cells: Array<{ cell: number; card: number }> }>;
   state: { starts_at: number | null; ends_at: number | null; done: boolean; correct: number; mistakes: number;
     combo: number; index: number; blocked_until: number; clicked: string[]; stage: number; cleared: number;
@@ -9,6 +10,45 @@ export type ActionView = {
   awaiting_transition?: boolean;
 };
 export type OrderedInputs = { offset: number; values: number[] };
+
+export const LEGACY_SEQUENCE_TIMING = Object.freeze({ step_ms: 700, visible_ms: 620 });
+
+export function resolveSequenceTiming(view: Pick<ActionView, 'sequence_timing'>) {
+  const timing = view.sequence_timing;
+  if (!timing || !Number.isSafeInteger(timing.step_ms) || !Number.isSafeInteger(timing.visible_ms) ||
+    timing.step_ms <= 0 || timing.visible_ms <= 0 || timing.visible_ms > timing.step_ms) {
+    return LEGACY_SEQUENCE_TIMING;
+  }
+  return timing;
+}
+
+export function sequencePreviewFrame(view: Pick<ActionView, 'sequence_timing' | 'sequence' | 'state'>, now: number) {
+  const timing = resolveSequenceTiming(view);
+  const elapsed = now - view.state.preview_at;
+  const index = Math.floor(elapsed / timing.step_ms);
+  return {
+    index,
+    visible: index >= 0 && index < view.sequence.length && elapsed % timing.step_ms < timing.visible_ms
+  };
+}
+
+export function shouldReplaySequencePreview(view: Pick<ActionView, 'state'>, activeKey?: string) {
+  const key = `${view.state.stage}:${view.state.input_at}`;
+  return view.state.position === 0 && activeKey !== key;
+}
+
+export function sequenceReplayStart(view: Pick<ActionView, 'state'>, now: number) {
+  return Math.max(view.state.preview_at, now);
+}
+
+export function canRestartSequencePreview(view: Pick<ActionView, 'state' | 'awaiting_transition'>) {
+  const state = view.state;
+  return state.starts_at !== null && !state.done && !view.awaiting_transition && state.position === 0;
+}
+
+export function canReplayHiddenSequencePreview(view: Pick<ActionView, 'state' | 'awaiting_transition'>, now: number) {
+  return canRestartSequencePreview(view) && now < view.state.input_at;
+}
 
 export function canPressOrderedAction(type: string, view: ActionView, now: number): boolean {
   const state = view.state;

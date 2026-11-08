@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { activeCatchCells, canPressOrderedAction, projectActionInputs, reconcileActionInputs } from './actionMinigameInput.ts';
-import { minigamePress } from './minigamePress.ts';
+import { activeCatchCells, canPressOrderedAction, canReplayHiddenSequencePreview, canRestartSequencePreview, projectActionInputs, reconcileActionInputs, resolveSequenceTiming, sequencePreviewFrame, sequenceReplayStart, shouldReplaySequencePreview } from './actionMinigameInput.ts';
+import { isPrimaryMinigamePointer, minigamePress, preventRepeatedKeyboardActivation } from './minigamePress.ts';
 
 const view = () => ({ revision: 1, server_now: 1000, cards: [], current_card: 0,
   upcoming_cards: [0, 1, 0, 0, 1], sequence: [0, 1, 1, 3], frames: [],
@@ -39,6 +39,39 @@ test('rapid correct relay input stays enabled while previews and stage transitio
   assert.equal(canPressOrderedAction('sequence_relay', saved, 3800), true);
   saved.awaiting_transition = true;
   assert.equal(canPressOrderedAction('sequence_relay', saved, 3800), false);
+});
+
+test('relay preview uses session timing while old and malformed sessions keep legacy timing', () => {
+  const current = view();
+  current.sequence_timing = { step_ms: 1000, visible_ms: 800 };
+  assert.deepEqual(resolveSequenceTiming(current), current.sequence_timing);
+  assert.deepEqual(sequencePreviewFrame(current, 1799), { index: 0, visible: true });
+  assert.deepEqual(sequencePreviewFrame(current, 1800), { index: 0, visible: false });
+  assert.deepEqual(sequencePreviewFrame(current, 2000), { index: 1, visible: true });
+
+  const legacy = view();
+  assert.deepEqual(resolveSequenceTiming(legacy), { step_ms: 700, visible_ms: 620 });
+  assert.deepEqual(sequencePreviewFrame(legacy, 1619), { index: 0, visible: true });
+  assert.deepEqual(sequencePreviewFrame(legacy, 1620), { index: 0, visible: false });
+  legacy.sequence_timing = { step_ms: 0, visible_ms: 100 };
+  assert.deepEqual(resolveSequenceTiming(legacy), { step_ms: 700, visible_ms: 620 });
+});
+
+test('relay only replays a complete preview for a fresh stage or retry', () => {
+  const fresh = view();
+  assert.equal(sequenceReplayStart(fresh, 900), 1000);
+  assert.equal(sequenceReplayStart(fresh, 1200), 1200);
+  assert.equal(shouldReplaySequencePreview(fresh), true);
+  assert.equal(shouldReplaySequencePreview(fresh, '0:3800'), false);
+  assert.equal(canReplayHiddenSequencePreview(fresh, 3799), true);
+  assert.equal(canReplayHiddenSequencePreview(fresh, 3800), false);
+  fresh.state.position = 2;
+  assert.equal(shouldReplaySequencePreview(fresh), false);
+  assert.equal(canRestartSequencePreview(fresh), false);
+  fresh.state.position = 0;
+  fresh.state.input_at = 7600;
+  assert.equal(shouldReplaySequencePreview(fresh, '0:3800'), true);
+  assert.equal(canRestartSequencePreview(fresh), true);
 });
 
 test('partial acknowledgement preserves presses made during a delayed request', () => {
@@ -105,4 +138,16 @@ test('pointer contact acts once, compatibility clicks do not repeat, keyboard re
   handlers.onClick({ detail: 0 });
   handlers.onPointerDown({ ...pointer, isPrimary: false });
   assert.equal(presses, 3);
+  assert.equal(isPrimaryMinigamePointer({ isPrimary: true }), true);
+  assert.equal(isPrimaryMinigamePointer({ isPrimary: false }), false);
+});
+
+test('held Enter and Space cannot repeat a focused card activation', () => {
+  let prevented = 0;
+  const event = key => ({ key, repeat: true, preventDefault() { prevented++; } });
+  assert.equal(preventRepeatedKeyboardActivation(event('Enter')), true);
+  assert.equal(preventRepeatedKeyboardActivation(event(' ')), true);
+  assert.equal(preventRepeatedKeyboardActivation(event('1')), false);
+  assert.equal(preventRepeatedKeyboardActivation({ ...event('Enter'), repeat: false }), false);
+  assert.equal(prevented, 2);
 });

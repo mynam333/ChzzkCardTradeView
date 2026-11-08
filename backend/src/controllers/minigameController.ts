@@ -1162,7 +1162,11 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     let targetData: any = {};
 
     if (isActionGame(game_type)) {
-      targetData = createActionTarget(game_type, getUniquePlayableImageCards(streamers, userImageBlindKeys));
+      // Version 2 clients can render the slower relay cadence. Missing/unknown
+      // versions keep the legacy cadence so already-open tabs remain playable
+      // while frontend and backend releases overlap.
+      const sequenceTimingVersion = req.body?.sequence_timing_version === 2 ? 2 : 1;
+      targetData = createActionTarget(game_type, getUniquePlayableImageCards(streamers, userImageBlindKeys), sequenceTimingVersion);
       gameData = publicActionGame(game_type, targetData as ActionTarget, initialActionState(), 0);
     } else if (game_type === 'quiz') {
       const quizCandidates = getPlayableImageCards(streamers, userImageBlindKeys)

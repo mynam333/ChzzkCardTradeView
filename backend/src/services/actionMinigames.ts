@@ -15,6 +15,9 @@ export const CATCH_INPUT_GRACE_MS = 500;
 export const SORT_INPUT_GRACE_MS = 500;
 export const FAN_SORT_PENALTY_MS = 500;
 export const CATCH_TARGET_COUNT = 12;
+export type SequenceTiming = { step_ms: number; visible_ms: number };
+export const LEGACY_SEQUENCE_TIMING: Readonly<SequenceTiming> = { step_ms: 700, visible_ms: 620 };
+export const SEQUENCE_TIMING_V2: Readonly<SequenceTiming> = { step_ms: 1000, visible_ms: 800 };
 export type ActionCard = { channel_id: string; name: string; image_url: string };
 export type CatchFrame = { start: number; duration: number; cells: Array<{ cell: number; card: number }> };
 export type ActionTarget = {
@@ -22,6 +25,9 @@ export type ActionTarget = {
   deck: number[];
   frames: CatchFrame[];
   sequences: number[][];
+  // Snapshotted per session. Targets created before this field was added use
+  // the legacy cadence for their entire lifetime.
+  sequence_timing?: SequenceTiming;
 };
 export type ActionState = {
   version: 1;
@@ -55,7 +61,7 @@ const shuffle = <T>(items: T[]): T[] => {
   return result;
 };
 
-export function createActionTarget(type: ActionGameType, candidates: ActionCard[]): ActionTarget {
+export function createActionTarget(type: ActionGameType, candidates: ActionCard[], sequenceTimingVersion: 1 | 2 = 2): ActionTarget {
   const needed = type === 'fan_meeting' ? 2 : 4;
   // Channel uniqueness alone does not guarantee different visible images.
   const images = new Set<string>();
@@ -69,7 +75,7 @@ export function createActionTarget(type: ActionGameType, candidates: ActionCard[
   const deck = type === 'fan_meeting'
     ? Array.from({ length: 240 }, () => crypto.randomInt(2)) : [];
   const sequences = type === 'sequence_relay'
-    ? Array.from({ length: 5 }, (_, stage) => Array.from({ length: stage + 4 }, () => crypto.randomInt(4))) : [];
+    ? Array.from({ length: 5 }, (_, stage) => Array.from({ length: stage + 3 }, () => crypto.randomInt(4))) : [];
   const frames: CatchFrame[] = [];
   if (type === 'streamer_catch') {
     // Reserve every target first, so random placement cannot reduce the quota or
@@ -103,8 +109,26 @@ export function createActionTarget(type: ActionGameType, candidates: ActionCard[
     }
     frames.sort((a, b) => a.start - b.start);
   }
-  return { cards, deck, frames, sequences };
+  return { cards, deck, frames, sequences,
+    ...(type === 'sequence_relay' ? {
+      sequence_timing: { ...(sequenceTimingVersion === 2 ? SEQUENCE_TIMING_V2 : LEGACY_SEQUENCE_TIMING) }
+    } : {}) };
 }
+
+export function resolveSequenceTiming(target: ActionTarget): SequenceTiming {
+  const timing = target.sequence_timing;
+  if (timing && Number.isSafeInteger(timing.step_ms) && timing.step_ms > 0 &&
+    Number.isSafeInteger(timing.visible_ms) && timing.visible_ms > 0 && timing.visible_ms <= timing.step_ms) {
+    return { step_ms: timing.step_ms, visible_ms: timing.visible_ms };
+  }
+  return { ...LEGACY_SEQUENCE_TIMING };
+}
+
+const sequenceInputAt = (target: ActionTarget, stage: number, previewAt: number): number => {
+  const sequence = target.sequences[stage];
+  if (!Array.isArray(sequence) || sequence.length === 0) throw new ActionGameError('순서 정보를 확인할 수 없습니다.');
+  return previewAt + sequence.length * resolveSequenceTiming(target).step_ms;
+};
 
 export function initialActionState(): ActionState {
   return { version: 1, starts_at: null, ends_at: null, done: false, correct: 0, mistakes: 0,
@@ -147,7 +171,9 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
     state.starts_at = now + (input.quick_start === true ? 0 : 3000);
     state.ends_at = state.starts_at + ACTION_GAME_PLAY_MS[type];
     state.preview_at = state.starts_at;
-    state.input_at = state.preview_at + 4 * 700;
+    state.input_at = type === 'sequence_relay'
+      ? sequenceInputAt(target, state.stage, state.preview_at)
+      : state.preview_at + 4 * LEGACY_SEQUENCE_TIMING.step_ms;
     return state;
   }
   if (state.starts_at === null || state.ends_at === null || now < state.starts_at) {
@@ -195,7 +221,7 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
       if (state.mistakes >= 2) state.done = true;
       else {
         state.preview_at = now;
-        state.input_at = state.preview_at + target.sequences[state.stage].length * 700;
+        state.input_at = sequenceInputAt(target, state.stage, state.preview_at);
       }
     } else {
       state.position++;
@@ -206,7 +232,7 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
           state.stage++;
           state.position = 0;
           state.preview_at = now;
-          state.input_at = state.preview_at + target.sequences[state.stage].length * 700;
+          state.input_at = sequenceInputAt(target, state.stage, state.preview_at);
         }
       }
     }
@@ -239,6 +265,7 @@ export function publicActionGame(type: ActionGameType, target: ActionTarget, sta
   const { last_request, last_action, inputs, ...publicState } = state;
   return { game_type: type, revision, server_now: now, server_received_at: receivedAt,
     input_grace_ms: type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : type === 'fan_meeting' ? SORT_INPUT_GRACE_MS : 0, cards: target.cards,
+    sequence_timing: type === 'sequence_relay' ? resolveSequenceTiming(target) : null,
     state: { ...publicState, input_count: inputs?.length || 0 },
     upcoming_cards: type === 'fan_meeting' ? target.deck.slice(state.index, state.index + 64) : [],
     target_count: type === 'streamer_catch' ? target.frames.filter(frame => frame.cells.some(cell => cell.card === 0)).length : 0,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACTION_GAMES, CATCH_INPUT_GRACE_MS, SORT_INPUT_GRACE_MS, ActionGameType, ActionState, actionReward, actionRewardTier, advanceActionGame,
-  createActionTarget, initialActionState, publicActionGame
+  createActionTarget, initialActionState, LEGACY_SEQUENCE_TIMING, publicActionGame, SEQUENCE_TIMING_V2
 } from '../services/actionMinigames';
 
 const cards = Array.from({ length: 8 }, (_, i) => ({ channel_id: `c${i}`, name: `사진 ${i}`, image_url: `https://example.com/${i}.png` }));
@@ -55,10 +55,12 @@ describe('new minigame generation and timing', () => {
     expect(publicActionGame('fan_meeting', fan.target, fan.state, 0)).not.toHaveProperty('deck');
     expect(publicActionGame('fan_meeting', fan.target, fan.state, 0).upcoming_cards).toEqual(fan.target.deck.slice(0, 64));
     const relay = ready('sequence_relay');
-    expect(relay.target.sequences.map(sequence => sequence.length)).toEqual([4, 5, 6, 7, 8]);
+    expect(relay.target.sequences.map(sequence => sequence.length)).toEqual([3, 4, 5, 6, 7]);
+    expect(relay.target.sequence_timing).toEqual(SEQUENCE_TIMING_V2);
     expect(publicActionGame('sequence_relay', relay.target, initialActionState(), 0).sequence).toEqual([]);
     const publicView = publicActionGame('sequence_relay', relay.target, { ...relay.state, last_request: 'private' }, 0);
     expect(publicView.sequence).toEqual(relay.target.sequences[0]);
+    expect(publicView.sequence_timing).toEqual(SEQUENCE_TIMING_V2);
     expect(publicView).not.toHaveProperty('sequences');
     expect(publicView.state).not.toHaveProperty('last_request');
   });
@@ -99,6 +101,23 @@ describe('server-owned action rules', () => {
     expect(() => advanceActionGame('sequence_relay', target, next, { kind: 'sequence', offset: 4, values: target.sequences[1] }, next.input_at - 1)).toThrow();
     expect(() => advanceActionGame('sequence_relay', target, state, { ...input, values: [...input.values, 0] }, state.input_at)).toThrow();
     expect(state.stage).toBe(0);
+  });
+
+  it('keeps pre-upgrade relay targets on their original cadence across retries and stages', () => {
+    const target = createActionTarget('sequence_relay', cards);
+    target.sequences = Array.from({ length: 5 }, (_, stage) => Array(stage + 4).fill(0));
+    delete target.sequence_timing;
+    let state = advanceActionGame('sequence_relay', target, initialActionState(), { kind: 'ready', quick_start: true }, 1000);
+    expect(state.input_at - state.preview_at).toBe(4 * LEGACY_SEQUENCE_TIMING.step_ms);
+    expect(publicActionGame('sequence_relay', target, state, 0).sequence_timing).toEqual(LEGACY_SEQUENCE_TIMING);
+
+    state = advanceActionGame('sequence_relay', target, state, { kind: 'sequence', value: 1 }, state.input_at);
+    expect(state.input_at - state.preview_at).toBe(4 * LEGACY_SEQUENCE_TIMING.step_ms);
+    for (const value of target.sequences[0]) {
+      state = advanceActionGame('sequence_relay', target, state, { kind: 'sequence', value }, state.input_at);
+    }
+    expect(state).toMatchObject({ stage: 1, cleared: 1, position: 0 });
+    expect(state.input_at - state.preview_at).toBe(5 * LEGACY_SEQUENCE_TIMING.step_ms);
   });
   it('blocks sorting for exactly 500ms after a mistake and keeps correct inputs immediate', () => {
     const { target, state } = ready('fan_meeting');

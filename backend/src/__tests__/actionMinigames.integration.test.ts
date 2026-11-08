@@ -21,10 +21,11 @@ const setDay = (type: ActionGameType) => {
   const date = Array.from({ length: 60 }, (_, day) => Date.UTC(2026, 8, 1 + day)).find(time => getDailyMinigame(time).game_type === type)!;
   vi.setSystemTime(date);
 };
-async function start(type: ActionGameType, practice = false) {
+async function start(type: ActionGameType, practice = false, sequenceTimingVersion?: number) {
   setDay(type);
   const res = response();
-  await startMinigame(request({ game_type: type, practice_mode: practice }), asResponse(res));
+  await startMinigame(request({ game_type: type, practice_mode: practice,
+    ...(sequenceTimingVersion === undefined ? {} : { sequence_timing_version: sequenceTimingVersion }) }), asResponse(res));
   expect(res.statusCode).toBe(200);
   return res.body as { session_id: string; game_data: ReturnType<typeof import('../services/actionMinigames').publicActionGame> };
 }
@@ -138,8 +139,32 @@ describe('new minigame API and SQLite settlement', () => {
       view = next.body.game_data;
       expect(view.state.cleared).toBe(stage + 1);
     }
-    expect(view.state.input_count).toBe(30);
+    expect(view.state.input_count).toBe(25);
     expect((await submit(session_id)).body).toMatchObject({ earned_points: 1200 });
+  });
+  it('negotiates the slower relay cadence without changing legacy or resumed sessions', async () => {
+    const modern = await start('sequence_relay', false, 2);
+    expect(modern.game_data.sequence_timing).toEqual({ step_ms: 1000, visible_ms: 800 });
+    expect(modern.game_data.sequence).toEqual([]);
+    const armed = await action(modern.session_id, { kind: 'ready', quick_start: true });
+    expect(armed.body.game_data.state.input_at - armed.body.game_data.state.preview_at).toBe(3000);
+
+    const resumed = await start('sequence_relay');
+    expect(resumed.session_id).toBe(modern.session_id);
+    expect(resumed.game_data.sequence_timing).toEqual({ step_ms: 1000, visible_ms: 800 });
+  });
+
+  it('uses the legacy relay cadence for clients without the timing handshake', async () => {
+    const legacy = await start('sequence_relay');
+    expect(legacy.game_data.sequence_timing).toEqual({ step_ms: 700, visible_ms: 620 });
+    const armed = await action(legacy.session_id, { kind: 'ready', quick_start: true });
+    expect(armed.body.game_data.state.input_at - armed.body.game_data.state.preview_at).toBe(2100);
+  });
+  it('falls back to the legacy relay cadence for an unknown timing version', async () => {
+    const legacy = await start('sequence_relay', false, 999);
+    expect(legacy.game_data.sequence_timing).toEqual({ step_ms: 700, visible_ms: 620 });
+    const armed = await action(legacy.session_id, { kind: 'ready', quick_start: true });
+    expect(armed.body.game_data.state.input_at - armed.body.game_data.state.preview_at).toBe(2100);
   });
   it.each(ACTION_GAMES)('starts %s without a timer, resumes without another ticket and arms after images are ready', async type => {
     const issued = await start(type);

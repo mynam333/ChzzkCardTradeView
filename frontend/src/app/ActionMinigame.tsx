@@ -5,8 +5,8 @@ import { ArrowLeft, ArrowRight, Check, Heart, RefreshCw, Trophy, X } from 'lucid
 import { apiFetch } from '@/lib/api';
 import { proxiedImage } from '@/lib/cosmetics';
 import { estimateActionClock } from './actionMinigameTiming';
-import { activeCatchCells, canPressOrderedAction, projectActionInputs, reconcileActionInputs, type ActionCard as Card, type ActionView as View, type OrderedInputs } from './actionMinigameInput';
-import { minigamePress } from './minigamePress';
+import { activeCatchCells, canPressOrderedAction, canReplayHiddenSequencePreview, canRestartSequencePreview, projectActionInputs, reconcileActionInputs, resolveSequenceTiming, sequencePreviewFrame, sequenceReplayStart, shouldReplaySequencePreview, type ActionCard as Card, type ActionView as View, type OrderedInputs } from './actionMinigameInput';
+import { isPrimaryMinigamePointer, minigamePress, preventRepeatedKeyboardActivation } from './minigamePress';
 
 export const ACTION_GAME_TYPES = ['fan_meeting', 'streamer_catch', 'sequence_relay'] as const;
 export type ActionGameType = typeof ACTION_GAME_TYPES[number];
@@ -39,7 +39,7 @@ export const resolveMinigameRewardConfig = (
 export const ACTION_GAME_COPY: Record<ActionGameType, { title: string; description: string; bonusCondition: string }> = {
   fan_meeting: { title: '팬 줄서기', description: '같은 사진 쪽으로 카드를 넘기세요. 20초 동안 15장 이상 분류하면 성공! 틀리면 0.5초간 멈추고 콤보가 초기화됩니다.', bonusCondition: '25장 이상 또는 무실수 20장 이상' },
   streamer_catch: { title: '게스트 캐치', description: '각 모니터에 불쑥 나타나는 목표 사진을 누르세요. 30초 동안 12번 등장하며, 7번 이상 잡고 실수 2회 이하면 성공!', bonusCondition: '10번 이상 캐치 · 실수 0회' },
-  sequence_relay: { title: '순서 기억', description: '사진이 나온 순서대로 누르세요. 4개부터 8개까지 5단계! 4단계 완료 시 성공, 두 번 틀리면 종료됩니다.', bonusCondition: '실수 없이 5단계 완료' }
+  sequence_relay: { title: '순서 기억', description: '사진이 나온 순서대로 누르세요. 3개부터 7개까지 5단계! 4단계 완료 시 성공, 두 번 틀리면 종료됩니다.', bonusCondition: '실수 없이 5단계 완료' }
 };
 
 type Input = { kind: 'ready' | 'sort' | 'catch' | 'sequence'; value?: number; frame?: number;
@@ -76,7 +76,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const [booted, setBooted] = useState(false);
   const [catchPending, setCatchPending] = useState<string[]>([]);
   const [orderedPending, setOrderedPending] = useState(0);
-  const [lastPress, setLastPress] = useState<{ card: number; at: number; correct: boolean } | null>(null);
+  const [lastPress, setLastPress] = useState<{ card: number; at: number; correct: boolean; ordinal: number } | null>(null);
   const [sessionRewardConfig, setSessionRewardConfig] = useState(() => resolveMinigameRewardConfig(rewardConfig));
   const current = useRef<View | null>(null);
   const projected = useRef<View | null>(null);
@@ -99,6 +99,8 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const settled = useRef(false);
   const startRequest = useRef<Promise<{ session_id: string; game_data: View; reward_config?: unknown; sentAt: number }> | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
+  const pressOrdinal = useRef(0);
+  const hiddenPreview = useRef<{ key: string; wasPreview: boolean } | null>(null);
   const copy = ACTION_GAME_COPY[type];
 
   const project = useCallback((data: View) => {
@@ -106,8 +108,9 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     // A delayed acknowledgement must not start the same visible penalty again.
     if (type === 'fan_meeting' && localPenaltyUntil.current !== null) next.state.blocked_until = localPenaltyUntil.current;
     if (type === 'sequence_relay' && previewClock.current) {
+      const timing = resolveSequenceTiming(data);
       next.state.preview_at = previewClock.current.start;
-      next.state.input_at = previewClock.current.start + data.sequence.length * 700;
+      next.state.input_at = previewClock.current.start + data.sequence.length * timing.step_ms;
     }
     return next;
   }, [type]);
@@ -123,11 +126,12 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     current.current = data;
     if (type === 'sequence_relay' && data.state.starts_at !== null) {
       const key = `${data.state.stage}:${data.state.input_at}`;
-      // Always show the complete sequence, even when a stage response is late.
-      // Later acknowledgements within that stage must not restart the preview.
-      if (previewClock.current?.key !== key) previewClock.current = {
-        key, start: Math.max(data.state.preview_at, Date.now() + clockOffset.current)
+      // New stages and mistake retries get one complete local preview even when
+      // their response is late. A resumed partial input must never replay it.
+      if (shouldReplaySequencePreview(data, previewClock.current?.key)) previewClock.current = {
+        key, start: sequenceReplayStart(data, Date.now() + clockOffset.current)
       };
+      else if (previewClock.current?.key !== key) previewClock.current = null;
     }
     orderedInputs.current = reconcileActionInputs(orderedInputs.current, data);
     projected.current = project(data);
@@ -227,7 +231,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     orderedInputs.current.values.push(value);
     projected.current = project(current.current!);
     setView(projected.current); setOrderedPending(orderedInputs.current.values.length);
-    setLastPress({ card: value, at, correct }); setNotice('');
+    setLastPress({ card: value, at, correct, ordinal: ++pressOrdinal.current }); setNotice('');
     void flushOrdered();
   }, [flushOrdered, project, type]);
 
@@ -302,11 +306,21 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     try {
       await preload(current.current.cards);
       if (!mounted.current) return;
+      if (type === 'sequence_relay' && canRestartSequencePreview(current.current)) {
+        const data = current.current;
+        previewClock.current = {
+          key: `${data.state.stage}:${data.state.input_at}`,
+          start: sequenceReplayStart(data, Date.now() + clockOffset.current)
+        };
+        projected.current = project(data);
+        setView(projected.current);
+        setNow(Date.now() + clockOffset.current);
+      }
       setBooted(true);
     } catch (err) {
       if (mounted.current) setError(readableError(err, '이미지 준비에 실패했습니다. 다시 시도해 주세요.'));
     } finally { if (mounted.current) setBusy(false); }
-  }, []);
+  }, [project, type]);
 
   useEffect(() => {
     mounted.current = true;
@@ -314,7 +328,11 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     if (!startRequest.current) {
       startRequest.current = (async () => {
         const sentAt = Date.now();
-        const response = await apiFetch('/minigames/start', { method: 'POST', body: JSON.stringify({ game_type: type, practice_mode: practice }), signal: AbortSignal.timeout(12000) });
+        const response = await apiFetch('/minigames/start', { method: 'POST', body: JSON.stringify({
+          game_type: type,
+          practice_mode: practice,
+          ...(type === 'sequence_relay' ? { sequence_timing_version: 2 } : {})
+        }), signal: AbortSignal.timeout(12000) });
         const data = await readResponse(response);
         if (!response.ok) throw new Error(data.message || '게임을 시작하지 못했습니다.');
         return { ...data, sentAt };
@@ -328,7 +346,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
       await prepare();
     }).catch(err => { if (!cancelled) setError(readableError(err, '게임 준비에 실패했습니다. 다시 시도해 주세요.')); });
     return () => { cancelled = true; mounted.current = false; };
-  }, [type, practice, rewardConfig, accept, prepare]);
+  }, [type, practice, accept, prepare]);
 
   useEffect(() => {
     if (!autoStart || !booted || busy || error || autoStarted.current || current.current?.state.starts_at !== null) return;
@@ -338,9 +356,37 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
 
   useEffect(() => {
     if (!booted || result) return;
-    const timer = window.setInterval(() => setNow(Date.now() + clockOffset.current), 50);
-    return () => window.clearInterval(timer);
-  }, [booted, result]);
+    const syncClock = () => setNow(Date.now() + clockOffset.current);
+    const onVisibilityChange = () => {
+      const shown = projected.current;
+      const serverNow = Date.now() + clockOffset.current;
+      if (document.visibilityState === 'hidden') {
+        const confirmed = current.current;
+        if (type === 'sequence_relay' && shown && confirmed) hiddenPreview.current = {
+          key: previewClock.current?.key || `${confirmed.state.stage}:${confirmed.state.input_at}`,
+          wasPreview: canReplayHiddenSequencePreview(shown, serverNow)
+        };
+        return;
+      }
+      const hidden = hiddenPreview.current;
+      if (hidden && type === 'sequence_relay' && current.current && projected.current &&
+        canRestartSequencePreview(current.current) && canRestartSequencePreview(projected.current) &&
+        orderedInputs.current.values.length === 0) {
+        const data = current.current;
+        const key = `${data.state.stage}:${data.state.input_at}`;
+        if (hidden.wasPreview || hidden.key !== key) {
+          previewClock.current = { key, start: sequenceReplayStart(data, serverNow) };
+          projected.current = project(data);
+          setView(projected.current);
+        }
+      }
+      hiddenPreview.current = null;
+      syncClock();
+    };
+    const timer = window.setInterval(syncClock, 50);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibilityChange); };
+  }, [booted, result, type, project]);
 
   const finish = useCallback(async () => {
     if (inFlight.current || deadlineSending.current || orderedSending.current || orderedRequest.current || orderedInputs.current.values.length || catchRequests.current.size || settled.current || !session.current) return;
@@ -404,8 +450,14 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const catchCells = view ? activeCatchCells(view, now) : new Map<number, { frame: number; card: number }>();
   const targetCount = view?.target_count || 12;
   const recentPress = lastPress && now - lastPress.at < 220 ? lastPress : null;
-  const previewIndex = state ? Math.floor((now - state.preview_at) / 700) : -1;
-  const previewCard = view && previewIndex >= 0 && previewIndex < view.sequence.length && (now - (state?.preview_at || 0)) % 700 < 620 ? view.cards[view.sequence[previewIndex]] : null;
+  const previewFrame = view ? sequencePreviewFrame(view, now) : { index: -1, visible: false };
+  const previewIndex = previewFrame.index;
+  const previewCard = view && previewFrame.visible ? view.cards[view.sequence[previewIndex]] : null;
+  const previewPhase = state?.starts_at === null || view?.awaiting_transition || (state?.starts_at && now < state.starts_at)
+    ? 'waiting'
+    : preview
+      ? previewFrame.visible ? 'preview' : 'gap'
+      : 'input';
   const activeCondition = type === 'fan_meeting'
     ? '성공 15장 · 보너스 25장 또는 무실수 20장'
     : type === 'streamer_catch'
@@ -514,16 +566,26 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
       </>}
 
       {type === 'sequence_relay' && <>
-        <div className="mb-3 text-center"><p className="font-bold" role="status">{state?.starts_at === null ? '아래 네 장의 사진이 차례로 나타나요' : view.awaiting_transition ? recentPress && !recentPress.correct ? '같은 순서를 다시 보여드릴게요' : '단계 완료! 다음 순서를 준비해요' : preview ? previewIndex < 0 ? '사진 순서를 기억하세요' : `${Math.min(previewIndex + 1, view.sequence.length)} / ${view.sequence.length}번째 사진을 기억하세요` : `${state?.position || 0} / ${view.sequence.length}개 입력 · 같은 순서로 누르세요`}</p>
+        <div className="mb-3 text-center"><p className="font-bold" role="status">{state?.starts_at === null ? '아래 네 장의 사진이 차례로 나타나요' : view.awaiting_transition ? lastPress && !lastPress.correct ? '같은 순서를 다시 보여드릴게요' : '단계 완료! 다음 순서를 준비해요' : preview ? previewIndex < 0 ? '사진 순서를 기억하세요' : `${Math.min(previewIndex + 1, view.sequence.length)} / ${view.sequence.length}번째 사진을 기억하세요` : `${state?.position || 0} / ${view.sequence.length}개 입력 · 같은 순서로 누르세요`}</p>
           <p className="mt-1 text-xs text-primary">{(state?.cleared || 0) >= 4 ? '4단계 성공! 기본 보상 확보 · 마지막 단계에 도전해요' : '4단계까지 맞히면 성공 · 전체 진행 상한 150초'}</p></div>
-        <div className="mx-auto mb-5 flex h-32 w-24 items-center justify-center overflow-hidden rounded-2xl border-2 border-primary/30 bg-secondary/40 p-2 sm:h-44 sm:w-32">
-          {preview && previewCard ? picture(previewCard) : recentPress ? picture(view.cards[recentPress.card]) : <span className="whitespace-pre-line text-center text-sm font-bold text-muted-foreground">{preview || state?.starts_at === null ? '기억할 준비!' : '순서대로\n눌러 주세요'}</span>}
+        <div data-testid="sequence-preview" data-phase={previewPhase} data-input-feedback={!preview && recentPress ? recentPress.correct ? 'correct' : 'wrong' : undefined}
+          className="mx-auto mb-3 flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border-2 border-primary/30 bg-secondary/40 p-2 sm:mb-5 sm:h-44 sm:w-32">
+          {preview ? previewCard
+            ? <div key={`preview-${state?.stage}-${state?.input_at}-${previewIndex}`} className="action-card-enter h-full w-full">{picture(previewCard)}</div>
+            : <span className="whitespace-pre-line text-center text-sm font-bold text-muted-foreground">기억할 준비!</span>
+            : recentPress
+              ? <div key={`input-${recentPress.ordinal}`} className="action-card-enter h-full w-full">{picture(view.cards[recentPress.card])}</div>
+              : <span className="whitespace-pre-line text-center text-sm font-bold text-muted-foreground">{state?.starts_at === null ? '기억할 준비!' : '순서대로\n눌러 주세요'}</span>}
         </div>
         <div className="mb-3 flex justify-center gap-1.5" aria-label={`${state?.position || 0}개 입력 완료`}>{view.sequence.map((_, i) => <span key={i} className={`h-2 w-5 rounded-full ${i < (state?.position || 0) ? 'bg-primary' : 'bg-secondary'}`} />)}</div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{view.cards.map((card, i) => <button key={card.channel_id} disabled={!enabled || preview || view.awaiting_transition} aria-label={`${i + 1}번 ${card.name}`}
-          onPointerDown={event => minigamePress(() => pressOrdered(i)).onPointerDown(event)}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{view.cards.map((card, i) => {
+          const previewActive = Boolean(preview && previewFrame.visible && view.sequence[previewIndex] === i);
+          return <button key={card.channel_id} disabled={!enabled || preview || view.awaiting_transition} aria-label={`${i + 1}번 ${card.name}`} data-preview-active={previewActive || undefined}
+          onKeyDown={event => { preventRepeatedKeyboardActivation(event.nativeEvent); }}
+          onPointerDown={event => { if (isPrimaryMinigamePointer(event)) minigamePress(() => pressOrdered(i)).onPointerDown(event); }}
           onClick={event => minigamePress(() => pressOrdered(i)).onClick(event)}
-          className={`touch-manipulation rounded-2xl border-2 p-2 disabled:opacity-60 ${recentPress?.card === i ? recentPress.correct ? 'border-primary bg-primary/15' : 'border-rose-400 bg-rose-500/10' : 'border-primary/25 bg-card hover:bg-primary/10'}`}><div className="h-20 sm:h-24">{picture(card)}</div><p className="mt-1 truncate text-xs font-bold">{i + 1}. {card.name}</p></button>)}</div>
+          className={`touch-manipulation rounded-2xl border-2 p-2 ${previewActive ? 'border-primary bg-primary/15 ring-2 ring-primary/50' : `disabled:opacity-60 ${!preview && recentPress?.card === i ? recentPress.correct ? 'border-primary bg-primary/15' : 'border-rose-400 bg-rose-500/10' : 'border-primary/25 bg-card enabled:hover:bg-primary/10'}`}`}><div className="h-14 sm:h-24">{picture(card)}</div><p className="mt-1 truncate text-xs font-bold">{i + 1}. {card.name}</p></button>;
+        })}</div>
         <p className="mt-3 text-center text-xs text-muted-foreground">숫자키 1~4 지원 · 틀리면 같은 순서를 다시 보여드려요</p>
       </>}
       {ended && !result && <p className="mt-5 text-center text-sm" role="status">결과를 확인하고 있어요…</p>}

@@ -1,5 +1,13 @@
 import type { MouseEvent, PointerEvent } from 'react';
 
+export const preventRepeatedKeyboardActivation = (event: Pick<KeyboardEvent, 'key' | 'repeat' | 'preventDefault'>) => {
+  if (!event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return false;
+  event.preventDefault();
+  return true;
+};
+
+export const isPrimaryMinigamePointer = (event: Pick<PointerEvent, 'isPrimary'>) => event.isPrimary !== false;
+
 // Pointer users act on contact; keyboard and assistive activation use click.
 // Ignore the compatibility click after pointerup to avoid submitting twice.
 export const minigamePress = (activate: () => void) => ({
