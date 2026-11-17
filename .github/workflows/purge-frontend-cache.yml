@@ -2,9 +2,6 @@ name: Purge Frontend Page Cache
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/purge-frontend-cache.yml']
 
 permissions:
   contents: read
@@ -42,7 +39,8 @@ jobs:
             await api(`/zones/${zone.id}/purge_cache`, { files });
             console.log('PURGE_RESULT=success; retired page URLs purged');
           })().catch(error => {
-            console.log(`PURGE_RESULT=unavailable; ${error.message}`);
-            console.log('The existing deployment remains healthy. Zone cache-purge access or a dashboard login is required to complete this optional cache maintenance.');
+            console.error(`PURGE_RESULT=unavailable; ${error.message}`);
+            console.error('Zone cache-purge access or a dashboard login is required. No cache purge was completed.');
+            process.exitCode = 1;
           });
           NODE
