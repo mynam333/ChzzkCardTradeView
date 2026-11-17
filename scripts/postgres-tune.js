@@ -200,10 +200,6 @@ const analyzeTables = [
   'shop_purchases',
   'minigame_sessions',
   'user_minigame_tickets',
-  'arena_matches',
-  'arena_player_ratings',
-  'arena_match_queue',
-  'arena_cup_queue',
   'user_asset_rankings',
   'user_asset_ranking_cards'
 ];

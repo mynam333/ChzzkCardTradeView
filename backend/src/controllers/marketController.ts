@@ -890,6 +890,32 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
       const streamerName = listing.card?.streamer?.name || '스트리머';
       const star = listing.card?.star ?? 0;
       const price = listing.price;
+      if (listing.buyer_id) {
+        // A settled auction is a completed purchase/sale just like a fixed-price
+        // purchase. Stable keys prevent settlement retries from counting twice.
+        await Promise.all([
+          recordAchievementEvent({
+            eventKey: `market:purchase:${listing.buyer_id}:${listing.id}`,
+            userId: listing.buyer_id,
+            eventType: 'market.purchase',
+            sourceType: 'market_listing',
+            sourceId: listing.id,
+            value: 1,
+            metadata: { price, seller_id: listing.seller_id, listing_type: 'auction' },
+            stats: { 'market.purchase.count': 1 }
+          }),
+          recordAchievementEvent({
+            eventKey: `market:sale:${listing.seller_id}:${listing.id}`,
+            userId: listing.seller_id,
+            eventType: 'market.sale',
+            sourceType: 'market_listing',
+            sourceId: listing.id,
+            value: 1,
+            metadata: { price, buyer_id: listing.buyer_id, listing_type: 'auction' },
+            stats: { 'market.sale.count': 1 }
+          })
+        ]);
+      }
       const auctionResult = listing.auction_result;
       const winner = auctionResult?.bidders.find((bidder) => bidder.is_winner);
       const winnerName = winner

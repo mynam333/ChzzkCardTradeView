@@ -8,7 +8,7 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 RELEASE_DIR="${RELEASE_ROOT}/${TIMESTAMP}"
 LOCK_FILE="${PROJECT_DIR}/deploy.lock"
 API_APP_NAME="${API_APP_NAME:-chikapo-api}"
-WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker chikapo-arena-worker}"
+WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker}"
 KEEP_RELEASES="${KEEP_RELEASES:-0}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
 PNPM_VERSION="${PNPM_VERSION:-10.10.0}"
@@ -639,6 +639,9 @@ if [ "${SKIP_SCHEMA:-false}" != "true" ] && is_postgres_like_deploy; then
   fi
 fi
 
+echo "[deploy] prepare weekly mission schema"
+"${NODE_BIN}" backend/dist/scripts/prepareWeeklyMissions.js
+
 echo "[deploy] reload api without downtime"
 if [ "${DEPLOY_RECOVERY_MODE:-false}" = "true" ]; then
   echo "[deploy] recovery mode: stop workers before api reload"
@@ -694,6 +697,12 @@ for app_name in ${WORKER_APP_NAMES}; do
   fi
   sleep 2
 done
+
+echo "[deploy] remove retired arena runtime"
+"${PM2_BIN}" delete chikapo-arena-worker >/dev/null 2>&1 || true
+"${PM2_BIN}" save
+rm -f "${PROJECT_DIR}/backend/.env.arena-worker"
+rm -rf "${PROJECT_DIR}/backend/dist.prev"
 
 if [ "${CLEANUP_RELEASE_ARTIFACTS}" = "true" ]; then
   echo "[deploy] cleanup release artifacts"

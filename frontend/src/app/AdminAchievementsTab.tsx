@@ -203,15 +203,7 @@ const rewardTypeLabels: Record<AchievementRewardType, string> = {
 
 const cosmeticTypeLabels: Record<ShopItem['type'], string> = {
   border: '테두리',
-  name_effect: '이름 이펙트',
-  emote: '아레나 이모트',
-  card_frame: '아레나 카드 프레임',
-  name_flare: '아레나 이름 연출',
-  hit_vfx: '아레나 타격 VFX',
-  summon_vfx: '아레나 소환 VFX',
-  ready_stamp: '아레나 준비 스탬프',
-  nameplate: '아레나 네임플레이트',
-  ko_text: '아레나 KO 문구'
+  name_effect: '이름 이펙트'
 };
 
 const emptyReward = (): AchievementReward => ({ type: 'point', points: 1000 });
@@ -321,7 +313,10 @@ export const AdminAchievementsTab: React.FC = () => {
   const fetchCosmetics = async () => {
     try {
       const res = await apiFetch('/admin/shop/items');
-      if (res.ok) setCosmetics(await res.json());
+      if (res.ok) {
+        const items: unknown = await res.json();
+        setCosmetics(Array.isArray(items) ? items.filter((item): item is ShopItem => item?.type === 'border' || item?.type === 'name_effect') : []);
+      }
     } catch {
       // 코스메틱 목록 조회 실패는 숫자 ID 저장 폴백으로 처리합니다.
     }

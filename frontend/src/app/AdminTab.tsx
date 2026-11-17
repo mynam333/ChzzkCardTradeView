@@ -506,7 +506,10 @@ export const AdminTab: React.FC = () => {
   const fetchCouponCosmetics = async () => {
     try {
       const res = await apiFetch('/admin/shop/items');
-      if (res.ok) setCouponCosmetics(await res.json());
+      if (res.ok) {
+        const items: unknown = await res.json();
+        setCouponCosmetics(Array.isArray(items) ? items.filter((item): item is ShopItem => item?.type === 'border' || item?.type === 'name_effect') : []);
+      }
     } catch { /* noop */ }
   };
   const fetchCouponTitles = async () => {
@@ -1725,6 +1728,7 @@ export const AdminTab: React.FC = () => {
     card_fuse: '카드 합성',
     coupon: '쿠폰',
     minigame: '미니게임',
+    weekly_mission: '주간 미션',
     shop_purchase: '상점 구매',
     shop_equip: '코스메틱 장착',
     shop_unequip: '코스메틱 해제',

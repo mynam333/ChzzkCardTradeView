@@ -72,6 +72,9 @@ jobs:
           node frontend/scripts/generate-icon-assets.mjs
           node --test frontend/src/lib/iconLibraryPerformance.test.mjs
 
+      - name: Test weekly missions and realtime topics
+        run: node --experimental-strip-types --test frontend/src/lib/weeklyMissions.test.mjs frontend/src/lib/realtimeTopics.test.mjs
+
       - name: Build frontend
         run: pnpm --filter frontend build
         env:

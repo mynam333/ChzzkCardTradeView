@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
+  CalendarClock,
   CheckCircle2,
   ChevronDown,
   Gift,
@@ -17,6 +18,14 @@ import { apiFetch } from '@/lib/api';
 import { AppIcon } from '@/lib/iconLibrary';
 import { useApp } from './AppContext';
 import type { AchievementCategory, AchievementReward, AchievementStatus, UserAchievement, UserAchievementsResponse } from '@/lib/types';
+import {
+  formatWeeklyRemaining,
+  getWeeklyServerOffset,
+  parseWeeklyMissionsPayload,
+  weeklyProgressPercent,
+  type WeeklyMission,
+  type WeeklyMissionsPayload
+} from '@/lib/weeklyMissions';
 
 type StatusFilter = 'all' | AchievementStatus;
 type HiddenFilter = 'all' | 'visible' | 'hidden';
@@ -54,6 +63,17 @@ const tierStyles: Record<string, string> = {
   event: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-600 dark:text-emerald-200'
 };
 
+const weeklyDifficultyLabels = { easy: '쉬움', normal: '보통', hard: '어려움' } as const;
+const weeklyDifficultyStyles = {
+  easy: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300',
+  normal: 'border-sky-400/30 bg-sky-400/10 text-sky-600 dark:text-sky-300',
+  hard: 'border-fuchsia-400/30 bg-fuchsia-400/10 text-fuchsia-600 dark:text-fuchsia-300'
+} as const;
+const weeklyStatusLabels = { in_progress: '진행 중', claimable: '수령 가능', claimed: '수령 완료' } as const;
+const weeklyEndFormatter = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+});
+
 const rewardText = (reward: AchievementReward) => {
   const quantity = Number(reward.quantity || 0);
   const suffix = reward.revoke_when_unmet ? ' (유지 중)' : '';
@@ -71,6 +91,62 @@ const AchievementIcon = ({ item }: { item: UserAchievement }) => {
   return <AppIcon name={iconName} className="h-5 w-5" style={{ color: item.icon_color || undefined }} />;
 };
 
+const weeklyRewardText = (mission: WeeklyMission) => {
+  const rewards: string[] = [];
+  if (mission.reward_points > 0) rewards.push(`${mission.reward_points.toLocaleString()}P`);
+  if (mission.reward_minigame_tickets > 0) rewards.push(`미니게임 티켓 ${mission.reward_minigame_tickets.toLocaleString()}장`);
+  if (mission.reward_free_draw_tickets > 0) rewards.push(`무료 소환권 ${mission.reward_free_draw_tickets.toLocaleString()}장`);
+  return rewards.join(' · ') || '보상 없음';
+};
+
+const WeeklyMissionCard = React.memo(function WeeklyMissionCard({ mission, claiming, expired, onClaim }: {
+  mission: WeeklyMission;
+  claiming: boolean;
+  expired: boolean;
+  onClaim: (mission: WeeklyMission) => void;
+}) {
+  const progressPercent = weeklyProgressPercent(mission);
+  return (
+    <article data-testid="weekly-mission-card" data-difficulty={mission.difficulty} data-status={mission.status}
+      className={`rounded-2xl border p-3.5 shadow-sm ${mission.status === 'claimable' ? 'border-emerald-400/45 bg-emerald-400/5' : 'border-border bg-card'}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black ${weeklyDifficultyStyles[mission.difficulty]}`}>
+            {weeklyDifficultyLabels[mission.difficulty]}
+          </span>
+          <h3 className="mt-2 text-sm font-black leading-snug text-foreground">{mission.title}</h3>
+        </div>
+        {mission.status === 'claimed' ? <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" /> : <Gift className="h-5 w-5 shrink-0 text-emerald-500" />}
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{mission.description}</p>
+      <div className="mt-3 space-y-1.5">
+        {mission.conditions.map((condition) => (
+          <div key={condition.label} className="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground">
+            <span className="min-w-0 truncate">{condition.label}</span>
+            <span className="shrink-0 tabular-nums">{Math.min(condition.progress, condition.target).toLocaleString()} / {condition.target.toLocaleString()}</span>
+          </div>
+        ))}
+        <div className="h-2 overflow-hidden rounded-full bg-secondary" aria-label={`진행도 ${progressPercent}%`}>
+          <div className={`h-full rounded-full ${mission.status === 'claimed' ? 'bg-primary' : mission.status === 'claimable' ? 'bg-emerald-500' : 'bg-sky-500'}`}
+            style={{ width: `${progressPercent}%` }} />
+        </div>
+      </div>
+      <div className="mt-3 flex items-end justify-between gap-2 border-t border-border/60 pt-2.5">
+        <div className="min-w-0">
+          <p className="text-xs font-black text-muted-foreground">{weeklyStatusLabels[mission.status]}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs font-bold text-foreground">{weeklyRewardText(mission)}</p>
+        </div>
+        {mission.status === 'claimable' && (
+          <button type="button" data-testid={`weekly-mission-claim-${mission.id}`} onClick={() => onClaim(mission)} disabled={claiming || expired}
+            className="min-h-11 shrink-0 rounded-xl bg-emerald-500 px-3 text-xs font-black text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
+            {claiming ? '수령 중' : expired ? '갱신 중' : '보상 수령'}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+});
+
 export const AchievementsTab: React.FC = () => {
   const { user, toast, refreshUserData } = useApp();
   const [items, setItems] = useState<UserAchievement[]>([]);
@@ -82,6 +158,169 @@ export const AchievementsTab: React.FC = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [claimingId, setClaimingId] = useState<number | null>(null);
+  const userId = user ? String(user.id) : '';
+  const [weeklyState, setWeeklyState] = useState<{ ownerId: string; payload: WeeklyMissionsPayload | null; loading: boolean; error: string }>({
+    ownerId: '', payload: null, loading: false, error: ''
+  });
+  const [claimingWeekly, setClaimingWeekly] = useState<{ ownerId: string; id: number } | null>(null);
+  const [weeklyClock, setWeeklyClock] = useState(() => Date.now());
+  const weeklyRequest = useRef<{ id: number; controller: AbortController } | null>(null);
+  const weeklyRequestId = useRef(0);
+  const weeklyClaimRequest = useRef<{ ownerId: string; weekKey: string; missionId: number; controller: AbortController } | null>(null);
+  const weeklyServerOffset = useRef(0);
+  const refreshedExpiredWeek = useRef('');
+
+  const loadWeeklyMissions = useCallback(async () => {
+    if (!userId) return;
+    weeklyRequest.current?.controller.abort();
+    const controller = new AbortController();
+    const requestId = ++weeklyRequestId.current;
+    weeklyRequest.current = { id: requestId, controller };
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 15_000);
+    setWeeklyState((previous) => ({
+      ownerId: userId,
+      payload: previous.ownerId === userId ? previous.payload : null,
+      loading: true,
+      error: ''
+    }));
+    try {
+      const response = await apiFetch('/achievements/weekly', { signal: controller.signal });
+      const raw = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if ((!timedOut && controller.signal.aborted) || weeklyRequest.current?.id !== requestId) return;
+      const payload = response.ok ? parseWeeklyMissionsPayload(raw) : null;
+      if (!response.ok || !payload) {
+        setWeeklyState((previous) => ({ ownerId: userId, payload: previous.ownerId === userId ? previous.payload : null, loading: false, error: String(raw?.message || '주간 미션을 불러오지 못했습니다.') }));
+        return;
+      }
+      weeklyServerOffset.current = getWeeklyServerOffset(payload.server_now);
+      setWeeklyClock(Date.now() + weeklyServerOffset.current);
+      setWeeklyState({ ownerId: userId, payload, loading: false, error: '' });
+    } catch (error) {
+      if ((!timedOut && controller.signal.aborted) || weeklyRequest.current?.id !== requestId) return;
+      setWeeklyState((previous) => ({ ownerId: userId, payload: previous.ownerId === userId ? previous.payload : null, loading: false, error: timedOut ? '주간 미션 응답이 지연되고 있습니다. 다시 시도해 주세요.' : error instanceof Error && /[가-힣]/.test(error.message) ? error.message : '주간 미션 연결이 지연되고 있습니다.' }));
+    } finally {
+      window.clearTimeout(timeout);
+      if (weeklyRequest.current?.id === requestId) weeklyRequest.current = null;
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    weeklyRequest.current?.controller.abort();
+    weeklyClaimRequest.current?.controller.abort();
+    weeklyRequest.current = null;
+    weeklyClaimRequest.current = null;
+    refreshedExpiredWeek.current = '';
+    if (!userId) {
+      return;
+    }
+    const start = window.setTimeout(() => { void loadWeeklyMissions(); }, 0);
+    return () => {
+      window.clearTimeout(start);
+      weeklyRequest.current?.controller.abort();
+      weeklyClaimRequest.current?.controller.abort();
+      weeklyRequest.current = null;
+      weeklyClaimRequest.current = null;
+    };
+  }, [userId, loadWeeklyMissions]);
+
+  const weekly = weeklyState.ownerId === userId ? weeklyState.payload : null;
+  const weeklyLoading = weeklyState.ownerId === userId && weeklyState.loading;
+  const weeklyError = weeklyState.ownerId === userId ? weeklyState.error : '';
+  const weeklyExpired = Boolean(weekly && weeklyClock >= Date.parse(weekly.ends_at));
+
+  useEffect(() => {
+    if (!weekly) return;
+    const updateClock = () => setWeeklyClock(Date.now() + weeklyServerOffset.current);
+    const onVisibility = () => { if (document.visibilityState === 'visible') updateClock(); };
+    updateClock();
+    const timer = window.setInterval(updateClock, 30_000);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [weekly]);
+
+  useEffect(() => {
+    if (!weekly || !weeklyExpired || weeklyLoading || refreshedExpiredWeek.current === weekly.week_key) return;
+    refreshedExpiredWeek.current = weekly.week_key;
+    void loadWeeklyMissions();
+  }, [weekly, weeklyExpired, weeklyLoading, loadWeeklyMissions]);
+
+  useEffect(() => {
+    if (!weekly || weeklyExpired) return;
+    const remaining = Date.parse(weekly.ends_at) - (Date.now() + weeklyServerOffset.current);
+    const timer = window.setTimeout(() => {
+      if (refreshedExpiredWeek.current === weekly.week_key) return;
+      refreshedExpiredWeek.current = weekly.week_key;
+      setWeeklyClock(Date.now() + weeklyServerOffset.current);
+      void loadWeeklyMissions();
+    }, Math.max(0, remaining) + 25);
+    return () => window.clearTimeout(timer);
+  }, [weekly, weeklyExpired, loadWeeklyMissions]);
+
+  const claimWeeklyMission = useCallback(async (mission: WeeklyMission) => {
+    if (!weekly || !userId || mission.status !== 'claimable' || weeklyClaimRequest.current) return;
+    if (Date.now() + weeklyServerOffset.current >= Date.parse(weekly.ends_at)) {
+      toast('주간 미션이 갱신되고 있습니다. 새 목록을 불러올게요.', 'info');
+      await loadWeeklyMissions();
+      return;
+    }
+    weeklyRequest.current?.controller.abort();
+    weeklyRequest.current = null;
+    weeklyRequestId.current++;
+    setWeeklyState((previous) => previous.ownerId === userId ? { ...previous, loading: false } : previous);
+    const controller = new AbortController();
+    const token = { ownerId: userId, weekKey: weekly.week_key, missionId: mission.id, controller };
+    weeklyClaimRequest.current = token;
+    setClaimingWeekly({ ownerId: userId, id: mission.id });
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 15_000);
+    try {
+      const response = await apiFetch(`/achievements/weekly/${mission.id}/claim`, {
+        method: 'POST',
+        body: JSON.stringify({ week_key: weekly.week_key }),
+        signal: controller.signal
+      });
+      const raw = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if ((!timedOut && controller.signal.aborted) || weeklyClaimRequest.current !== token) return;
+      if (!response.ok) {
+        const code = String(raw?.code || '');
+        if (response.status === 409 && code === 'WEEK_CHANGED') {
+          toast('새 주간 미션으로 갱신되었습니다.', 'info');
+          await loadWeeklyMissions();
+        } else if ((response.status === 409 && code === 'NOT_COMPLETED') || response.status === 404) {
+          toast(String(raw?.message || '주간 미션 상태가 변경되었습니다.'), 'info');
+          await loadWeeklyMissions();
+        } else {
+          toast(String(raw?.message || '주간 미션 보상을 수령하지 못했습니다.'), 'error');
+        }
+        return;
+      }
+      const payload = parseWeeklyMissionsPayload(raw);
+      if (!payload || payload.week_key !== token.weekKey) {
+        await loadWeeklyMissions();
+        return;
+      }
+      weeklyServerOffset.current = getWeeklyServerOffset(payload.server_now);
+      setWeeklyClock(Date.now() + weeklyServerOffset.current);
+      setWeeklyState({ ownerId: token.ownerId, payload, loading: false, error: '' });
+      const claimResult = raw?.claim_result as { already_claimed?: boolean } | undefined;
+      toast(claimResult?.already_claimed ? '이미 수령한 주간 미션 보상입니다.' : '주간 미션 보상을 수령했습니다.', 'success');
+      void refreshUserData();
+    } catch (error) {
+      if ((timedOut || !controller.signal.aborted) && weeklyClaimRequest.current === token) {
+        toast(timedOut ? '보상 수령 응답이 지연되고 있습니다. 다시 눌러 상태를 확인해 주세요.' : error instanceof Error && /[가-힣]/.test(error.message) ? error.message : '주간 미션 보상 수령 연결이 지연되고 있습니다.', 'error');
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (weeklyClaimRequest.current === token) {
+        weeklyClaimRequest.current = null;
+        setClaimingWeekly(null);
+      }
+    }
+  }, [weekly, userId, toast, loadWeeklyMissions, refreshUserData]);
 
   const fetchAchievements = async () => {
     if (!user) return;
@@ -93,9 +332,9 @@ export const AchievementsTab: React.FC = () => {
       if (hidden !== 'all') params.set('hidden', hidden);
       params.set('sort', sort);
       const res = await apiFetch(`/achievements?${params.toString()}`);
-      const data = await res.json().catch(() => null) as UserAchievementsResponse | null;
+      const data = await res.json().catch(() => null) as (UserAchievementsResponse & { message?: string }) | null;
       if (!res.ok || !data) {
-        toast((data as any)?.message || '업적 목록을 불러오지 못했습니다.', 'error');
+        toast(data?.message || '업적 목록을 불러오지 못했습니다.', 'error');
         return;
       }
       setItems(data.items || []);
@@ -106,7 +345,8 @@ export const AchievementsTab: React.FC = () => {
   };
 
   useEffect(() => {
-    void fetchAchievements();
+    const start = window.setTimeout(() => { void fetchAchievements(); }, 0);
+    return () => window.clearTimeout(start);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, status, category, hidden, sort]);
 
@@ -149,6 +389,8 @@ export const AchievementsTab: React.FC = () => {
   const total = Number(summary.total || items.length || 0);
   const completed = Number(summary.completed || 0);
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const weeklyRemaining = weekly ? formatWeeklyRemaining(weekly.ends_at, weeklyClock) : '';
+  const weeklyEndLabel = weekly ? `${weeklyEndFormatter.format(new Date(weekly.ends_at))} KST 초기화` : '매주 월요일 00:00 KST 초기화';
 
   return (
     <section data-tour="achievements-overview" className="space-y-5">
@@ -179,6 +421,61 @@ export const AchievementsTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <section data-testid="weekly-missions" className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/8 via-card to-accent/20 p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+              <CalendarClock className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-black text-foreground">이번 주 미션</h2>
+                <span className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] font-black text-primary">쉬움 2 · 보통 2 · 어려움 1</span>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">개인별 5개 미션 · 완료 후 보상을 직접 수령하세요.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            {weekly && <span className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-black text-foreground">
+              완료 {weekly.summary.completed.toLocaleString()} / {weekly.summary.total.toLocaleString()}
+            </span>}
+            <div className="text-left sm:text-right">
+              <p data-testid="weekly-missions-countdown" className={`text-xs font-black ${weeklyExpired ? 'text-amber-500' : 'text-primary'}`}>{weeklyRemaining || (weeklyLoading ? '주간 미션 확인 중' : '주간 미션')}</p>
+              <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">{weeklyEndLabel}</p>
+            </div>
+            <button type="button" aria-label="주간 미션 새로고침" onClick={() => void loadWeeklyMissions()}
+              disabled={weeklyLoading || Boolean(claimingWeekly)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${weeklyLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {weeklyError && (
+          <div data-testid="weekly-missions-error" role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+            <p className="font-bold text-foreground">{weeklyError}</p>
+            <button type="button" data-testid="weekly-missions-retry" onClick={() => void loadWeeklyMissions()} disabled={weeklyLoading}
+              className="min-h-11 shrink-0 rounded-xl bg-primary px-4 text-xs font-black text-primary-foreground disabled:opacity-50">
+              {weeklyLoading ? '다시 불러오는 중' : '다시 시도'}
+            </button>
+          </div>
+        )}
+
+        {weeklyLoading && !weekly && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5" role="status" aria-label="주간 미션을 불러오는 중">
+            {Array.from({ length: 5 }, (_, index) => <div key={index} className="h-44 animate-pulse rounded-2xl border border-border bg-card/70" />)}
+          </div>
+        )}
+        {weekly && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {weekly.missions.map((mission) => (
+              <WeeklyMissionCard key={mission.id} mission={mission} claiming={claimingWeekly?.ownerId === userId && claimingWeekly.id === mission.id}
+                expired={weeklyExpired || weeklyLoading} onClaim={claimWeeklyMission} />
+            ))}
+          </div>
+        )}
+      </section>
 
       <div data-tour="achievements-filters" className="rounded-2xl border border-border bg-card p-4 shadow-sm">
         <div className="grid gap-3 lg:grid-cols-[1.1fr_170px_170px_170px_170px_auto]">

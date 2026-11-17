@@ -5,15 +5,7 @@
 
 export type CosmeticType =
   | 'border'
-  | 'name_effect'
-  | 'emote'
-  | 'card_frame'
-  | 'name_flare'
-  | 'hit_vfx'
-  | 'summon_vfx'
-  | 'ready_stamp'
-  | 'nameplate'
-  | 'ko_text';
+  | 'name_effect';
 
 export interface UserTitle {
   id: number;
@@ -119,6 +111,7 @@ export type PointLedgerSourceType =
   | 'card_sell'
   | 'coupon'
   | 'minigame'
+  | 'weekly_mission'
   | 'shop_purchase'
   | 'market_purchase'
   | 'market_sale'

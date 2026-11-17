@@ -15,8 +15,7 @@ import {
   Shield,
   Store,
   Gamepad2,
-  Award,
-  Swords
+  Award
 } from 'lucide-react';
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
@@ -75,11 +74,9 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       ? [{ id: 'admin' as TabId, label: '관리자', icon: Shield }]
       : []),
   ];
-  const arenaNavItem: NavItem = { id: 'arena', label: '아레나', icon: Swords };
-
-  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'arena', 'achievements', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
+  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'achievements', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
   const mobileNavItems = mobileNavOrder
-    .map((id) => id === 'arena' ? arenaNavItem : navItems.find((item) => item.id === id))
+    .map((id) => navItems.find((item) => item.id === id))
     .filter((item): item is NavItem => Boolean(item));
 
   const handleDesktopLogoClick = () => {
@@ -218,19 +215,6 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
         {/* 테마 스위치 */}
         <div className="mt-auto shrink-0 space-y-3 pt-4 border-t border-border">
-          <button
-            type="button"
-            onClick={() => router.push('/arena')}
-            onPointerEnter={() => prefetchTab('arena')}
-            onFocus={() => prefetchTab('arena')}
-            className="cute-wiggle-hover flex w-full items-center gap-3 rounded-2xl border border-primary/20 bg-white/70 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 hover:bg-secondary/70 dark:bg-white/10"
-          >
-            <Swords className="h-4.5 w-4.5 text-primary" />
-            <span className="min-w-0">
-              <span className="block truncate">아레나로 이동</span>
-              <span className="block truncate text-[10px] font-bold text-muted-foreground">치카포 기반 듀얼 게임</span>
-            </span>
-          </button>
           <div className="flex items-center justify-between px-2">
             <span className="text-xs font-bold text-muted-foreground">화면 테마</span>
             <button

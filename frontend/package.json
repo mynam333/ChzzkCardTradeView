@@ -9,10 +9,8 @@
     "lint": "eslint",
     "test:cosmetics": "vitest run src/lib/cosmetics.test.ts src/lib/cosmeticFrameLayers.test.ts src/app/CosmeticFrame.test.tsx",
     "test:inventory": "vitest run src/lib/inventoryModel.test.ts && node --experimental-strip-types --test src/lib/tradeSelection.test.mjs src/lib/inventoryLoad.test.mjs",
-    "test:arena-assets": "node --experimental-strip-types --test src/lib/arenaAssetUrl.test.mjs",
-    "test:arena-card-editor": "node --experimental-strip-types --test src/lib/arenaCardEditor.test.mjs",
-    "test:arena-cosmetics": "node --experimental-strip-types --test src/lib/realtimeTopics.test.mjs src/app/arena/arenaCosmeticState.test.mjs",
-    "test:arena-replay": "node --experimental-strip-types --test src/app/arena/matches/arenaReplay.test.mjs"
+    "test:realtime": "node --experimental-strip-types --test src/lib/realtimeTopics.test.mjs",
+    "test:weekly": "node --experimental-strip-types --test src/lib/weeklyMissions.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -25,7 +23,6 @@
     "marked": "^18.0.5",
     "motion": "^12.40.0",
     "next": "16.2.12",
-    "pixi.js": "^8.19.0",
     "postcss": "8.5.25",
     "react": "19.2.4",
     "react-advanced-cropper": "^0.20.1",

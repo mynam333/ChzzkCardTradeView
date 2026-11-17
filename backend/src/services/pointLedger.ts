@@ -6,6 +6,7 @@ export type PointLedgerSourceType =
   | 'card_sell'
   | 'coupon'
   | 'minigame'
+  | 'weekly_mission'
   | 'shop_purchase'
   | 'market_purchase'
   | 'market_sale'

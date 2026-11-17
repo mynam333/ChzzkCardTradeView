@@ -56,19 +56,7 @@ vi.mock('../controllers/shopController', () => {
     adminGetShopItems: unused,
     adminCreateShopItem: mocks.create,
     adminUpdateShopItem: mocks.update,
-    adminResetPurchases: mocks.reset,
-    adminGetArenaCosmetics: unused,
-    adminCreateArenaCosmetic: unused,
-    adminUpdateArenaCosmetic: unused,
-    uploadArenaCosmeticAsset: unused,
-    uploadArenaEmoteAsset: unused,
-    getArenaCosmeticShopItems: unused,
-    getArenaCosmeticInventoryCounts: unused,
-    getArenaCosmeticPurchases: unused,
-    getArenaCosmeticLoadout: unused,
-    updateArenaCosmeticLoadout: unused,
-    buyArenaCosmetic: unused,
-    sendArenaEmote: unused
+    adminResetPurchases: mocks.reset
   };
 });
 

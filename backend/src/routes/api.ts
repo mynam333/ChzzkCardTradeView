@@ -81,6 +81,7 @@ import {
   adminCreateAchievement,
   adminUpdateAchievement
 } from '../controllers/achievementController';
+import { claimMyWeeklyMission, getMyWeeklyMissions } from '../controllers/weeklyMissionController';
 
 import {
   getUserMe,
@@ -200,19 +201,7 @@ import {
   adminGetShopItems,
   adminCreateShopItem,
   adminUpdateShopItem,
-  adminResetPurchases,
-  adminGetArenaCosmetics,
-  adminCreateArenaCosmetic,
-  adminUpdateArenaCosmetic,
-  uploadArenaCosmeticAsset,
-  uploadArenaEmoteAsset,
-  getArenaCosmeticShopItems,
-  getArenaCosmeticInventoryCounts,
-  getArenaCosmeticPurchases,
-  getArenaCosmeticLoadout,
-  updateArenaCosmeticLoadout,
-  buyArenaCosmetic,
-  sendArenaEmote
+  adminResetPurchases
 } from '../controllers/shopController';
 import {
   getMinigameStatus,
@@ -225,50 +214,6 @@ import {
   markMinigameRequestTime,
   submitMinigameResult
 } from '../controllers/minigameController';
-import {
-  acceptMyArenaV2QuickQueueController,
-  abandonArenaV2BotMatchController,
-  cancelMyArenaV2BattleRoyaleQueueController,
-  cancelMyArenaV2QuickQueueController,
-  createArenaV2BotMatchController,
-  createArenaV2SeasonAdminController,
-  deleteArenaV2DeckController,
-  createArenaV2MatchController,
-  grantArenaV2SeasonRewardsAdminController,
-  getArenaV2CardDetailController,
-  getArenaV2CurrentSeasonController,
-  getActiveArenaV2MatchController,
-  getArenaV2MatchController,
-  getArenaV2ReplayController,
-  getArenaV2BattleRoyaleController,
-  getArenaV2CurrentRewardsController,
-  getMyArenaV2StreamerCardController,
-  getMyArenaV2BattleRoyaleQueueStatusController,
-  getMyArenaV2QuickQueueStatusController,
-  joinArenaV2BattleRoyaleQueueController,
-  joinArenaV2QuickQueueController,
-  listArenaV2CardsController,
-  listArenaV2DecksController,
-  listArenaV2RankingsController,
-  listMyArenaV2OwnedCardsController,
-  holdArenaV2ReplayAdminController,
-  holdArenaV2RewardGrantAdminController,
-  previewArenaV2SeasonRewardsAdminController,
-  recordArenaV2OpsFlagAdminController,
-  releaseArenaV2RewardGrantAdminController,
-  revalidateArenaV2DeckController,
-  saveArenaV2DeckController,
-  submitArenaV2MulliganController,
-  submitArenaV2TurnActionsController,
-  surrenderArenaV2MatchController,
-  transitionArenaV2SeasonAdminController,
-  updateMyArenaV2StreamerCardController,
-  updateArenaV2DeckController,
-  updateArenaV2SeasonAdminController,
-  validateArenaV2DeckController,
-  disableMyArenaV2StreamerCardController,
-  enableMyArenaV2StreamerCardController
-} from '../controllers/arenaV2Controller';
 import { streamerRepository, titleRepository } from '../repositories';
 
 import { rateLimit } from '../middlewares/rateLimit';
@@ -318,20 +263,6 @@ const minigameLimiter = rateLimit({
 // Real-time games can legitimately generate several inputs per second.
 const minigameActionLimiter = rateLimit({ windowMs: 10_000, max: 100, key: 'minigame-action', keyByUser: true });
 const streamerReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('STREAMER_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('STREAMER_READ_RATE_LIMIT_MAX', 240), key: 'streamer-read' });
-const arenaReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_READ_RATE_LIMIT_MAX', 240), key: 'arena-read' });
-const arenaDeckWriteLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_DECK_WRITE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_DECK_WRITE_RATE_LIMIT_MAX', 12), key: 'arena-deck-write', keyByUser: true });
-const arenaBotMatchLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_BOT_MATCH_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_BOT_MATCH_RATE_LIMIT_MAX', 10), key: 'arena-bot-match', keyByUser: true });
-const arenaQuickJoinLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_JOIN_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_JOIN_RATE_LIMIT_MAX', 6), key: 'arena-quick-join', keyByUser: true });
-const arenaQuickStatusLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_STATUS_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_STATUS_RATE_LIMIT_MAX', 120), key: 'arena-quick-status', keyByUser: true });
-const arenaQuickAcceptLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_ACCEPT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_ACCEPT_RATE_LIMIT_MAX', 12), key: 'arena-quick-accept', keyByUser: true });
-const arenaQuickCancelLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_CANCEL_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_CANCEL_RATE_LIMIT_MAX', 6), key: 'arena-quick-cancel', keyByUser: true });
-const arenaAdminLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_ADMIN_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_ADMIN_RATE_LIMIT_MAX', 30), key: 'arena-admin', keyByUser: true });
-const arenaStreamerConfigLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_STREAMER_CONFIG_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_STREAMER_CONFIG_RATE_LIMIT_MAX', 3), key: 'arena-streamer-config', keyByUser: true });
-const arenaStreamerToggleLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_STREAMER_TOGGLE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_STREAMER_TOGGLE_RATE_LIMIT_MAX', 5), key: 'arena-streamer-toggle', keyByUser: true });
-const arenaCosmeticWriteLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_COSMETIC_WRITE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_COSMETIC_WRITE_RATE_LIMIT_MAX', 20), key: 'arena-cosmetic-write', keyByUser: true });
-const arenaRoundCommitLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_ROUND_COMMIT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_ROUND_COMMIT_RATE_LIMIT_MAX', 18), key: 'arena-round-commit', keyByUser: true });
-const arenaShareLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_SHARE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_SHARE_RATE_LIMIT_MAX', 8), key: 'arena-share', keyByUser: true });
-const arenaSpectatorLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_SPECTATOR_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_SPECTATOR_RATE_LIMIT_MAX', 120), key: 'arena-spectator' });
 
 const STREAMER_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('STREAMER_IMAGE_MAX_UPLOAD_BYTES', 20 * 1024 * 1024, { minBytes: 1024 * 1024 });
 const CHAT_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('CHAT_IMAGE_MAX_UPLOAD_BYTES', 25 * 1024 * 1024, { minBytes: 1024 * 1024 });
@@ -398,18 +329,6 @@ export const uploadChatImage = (req: any, res: any, next: any) => {
   });
 };
 
-const arenaV2LegacyEndpointRemoved = (_req: any, res: any) => res.status(410).json({
-  error: 'ArenaV2EndpointRequired',
-  message: '치카포 아레나는 v2 GDD 기준으로 교체되었습니다. v2 전용 API를 사용해주세요.'
-});
-
-const arenaV2SystemStatus = (_req: any, res: any) => res.status(200).json({
-  status: 'ok',
-  arenaVersion: 'v2',
-  rulesVersion: 'arena-v2-gdd-1.0.0',
-  message: '치카포 아레나 v2 API가 활성화되어 있습니다.'
-});
-
 // ==========================================
 // 헬스체크 엔드포인트 (/api/health)
 // ==========================================
@@ -469,6 +388,8 @@ router.get('/image-proxy', async (req, res, next) => {
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.get('/users/me/asset-events', authMiddleware, banCheckMiddleware, getMyAssetEvents);
 router.get('/achievements', authMiddleware, banCheckMiddleware, getMyAchievements);
+router.get('/achievements/weekly', authMiddleware, banCheckMiddleware, getMyWeeklyMissions);
+router.post('/achievements/weekly/:id/claim', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, claimMyWeeklyMission);
 router.post('/achievements/recalculate', authMiddleware, banCheckMiddleware, recalculateMyAchievements);
 router.post('/achievements/:id/claim', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, claimMyAchievement);
 router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updateMyStatusMessage);
@@ -598,117 +519,6 @@ router.post('/minigames/round-start', authMiddleware, banCheckMiddleware, accoun
 router.post('/minigames/round-answer', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, checkMinigameRoundAnswer);
 router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, submitMinigameResult);
 router.post('/minigames/action', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameActionLimiter, playMinigameAction);
-
-// ==========================================
-// 치카포 아레나 API (읽기 우선, 저부하 캐시 기반)
-// ==========================================
-router.get('/arena/system-status', arenaReadLimiter, arenaV2SystemStatus);
-router.get('/admin/arena/system', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2SystemStatus);
-router.post('/admin/arena/ops/flags', authMiddleware, adminMiddleware, arenaAdminLimiter, recordArenaV2OpsFlagAdminController);
-router.patch('/admin/arena/system/flags/:flag', authMiddleware, adminMiddleware, arenaAdminLimiter, recordArenaV2OpsFlagAdminController);
-router.post('/admin/arena/seasons', authMiddleware, adminMiddleware, arenaAdminLimiter, createArenaV2SeasonAdminController);
-router.patch('/admin/arena/seasons/:season_id', authMiddleware, adminMiddleware, arenaAdminLimiter, updateArenaV2SeasonAdminController);
-router.post('/admin/arena/seasons/:season_id/transition', authMiddleware, adminMiddleware, arenaAdminLimiter, transitionArenaV2SeasonAdminController);
-router.get('/admin/arena/seasons/:season_id/reward-preview', authMiddleware, adminMiddleware, arenaAdminLimiter, previewArenaV2SeasonRewardsAdminController);
-router.post('/admin/arena/seasons/:season_id/grant-rewards', authMiddleware, adminMiddleware, arenaAdminLimiter, grantArenaV2SeasonRewardsAdminController);
-router.patch('/admin/arena/season', authMiddleware, adminMiddleware, arenaAdminLimiter, updateArenaV2SeasonAdminController);
-router.patch('/admin/arena/restrictions/:type/:id', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/admin/arena/audit-logs', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/admin/arena/jobs', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/admin/arena/stats', authMiddleware, adminMiddleware, arenaAdminLimiter, listArenaV2RankingsController);
-router.get('/admin/arena/stats/overview', authMiddleware, adminMiddleware, arenaAdminLimiter, listArenaV2RankingsController);
-router.get('/admin/arena/stats/balance', authMiddleware, adminMiddleware, arenaAdminLimiter, listArenaV2RankingsController);
-router.get('/admin/arena/abuse-audit', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/rewards/:grant_id/hold', authMiddleware, adminMiddleware, arenaAdminLimiter, holdArenaV2RewardGrantAdminController);
-router.post('/admin/arena/rewards/:grant_id/release', authMiddleware, adminMiddleware, arenaAdminLimiter, releaseArenaV2RewardGrantAdminController);
-router.post('/admin/arena/matches/:match_id/replay-hold', authMiddleware, adminMiddleware, arenaAdminLimiter, holdArenaV2ReplayAdminController);
-router.get('/admin/arena/matches/:match_id/replay-diagnostic', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/admin/arena/reports', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/reports/:report_id/review', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/admin/arena/streamer-right-requests', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/streamer-right-requests/:request_id/review', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/cosmetics/emote-assets', authMiddleware, adminMiddleware, arenaAdminLimiter, uploadSingleImage, uploadArenaEmoteAsset);
-router.get('/admin/arena/cosmetics', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaCosmetics);
-router.post('/admin/arena/cosmetics', authMiddleware, adminMiddleware, arenaAdminLimiter, adminCreateArenaCosmetic);
-router.patch('/admin/arena/cosmetics/:id', authMiddleware, adminMiddleware, arenaAdminLimiter, adminUpdateArenaCosmetic);
-router.post('/admin/arena/cosmetics/assets', authMiddleware, adminMiddleware, arenaAdminLimiter, uploadSingleImage, uploadArenaCosmeticAsset);
-router.get('/admin/arena/quick-match', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/quick-match/recover-queue', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/admin/arena/cups', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/cups/recover-queue', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/stats/rebuild', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/rankings/rebuild', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/admin/arena/matches/prune-logs', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/telemetry/performance', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/season/current', arenaReadLimiter, getArenaV2CurrentSeasonController);
-router.get('/arena/seasons/current', arenaReadLimiter, getArenaV2CurrentSeasonController);
-router.get('/arena/rules/catalog', arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/wiki', arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/wiki/:slug', arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/cosmetics/shop-items', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaCosmeticShopItems);
-router.get('/arena/cosmetics/inventory-counts', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaCosmeticInventoryCounts);
-router.get('/arena/cosmetics/purchases', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaCosmeticPurchases);
-router.get('/arena/cosmetics/loadout', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaCosmeticLoadout);
-router.patch('/arena/cosmetics/loadout', authMiddleware, banCheckMiddleware, arenaCosmeticWriteLimiter, updateArenaCosmeticLoadout);
-router.post('/arena/cosmetics/buy', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaCosmeticWriteLimiter, buyArenaCosmetic);
-router.get('/arena/cups/status', arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/cups/join', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickJoinLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/cups/queue/join', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickJoinLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/cups/queue/status', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/cups/queue/events', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/cups/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/cups/queue/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/cups/:cup_id', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/battle-royales/join', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickJoinLimiter, joinArenaV2BattleRoyaleQueueController);
-router.get('/arena/battle-royales/status', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, getMyArenaV2BattleRoyaleQueueStatusController);
-router.post('/arena/battle-royales/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, cancelMyArenaV2BattleRoyaleQueueController);
-router.post('/arena/battle-royales/queue/join', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickJoinLimiter, joinArenaV2BattleRoyaleQueueController);
-router.get('/arena/battle-royales/queue/status', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, getMyArenaV2BattleRoyaleQueueStatusController);
-router.post('/arena/battle-royales/queue/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, cancelMyArenaV2BattleRoyaleQueueController);
-router.get('/arena/battle-royales/:battle_royale_id', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2BattleRoyaleController);
-router.get('/arena/cards/owned', authMiddleware, banCheckMiddleware, arenaReadLimiter, listMyArenaV2OwnedCardsController);
-router.get('/arena/cards', arenaReadLimiter, listArenaV2CardsController);
-router.get('/arena/cards/:card_id', arenaReadLimiter, getArenaV2CardDetailController);
-router.get('/arena/decks', authMiddleware, banCheckMiddleware, arenaReadLimiter, listArenaV2DecksController);
-router.post('/arena/decks/validate', authMiddleware, banCheckMiddleware, arenaReadLimiter, validateArenaV2DeckController);
-router.post('/arena/decks', authMiddleware, banCheckMiddleware, arenaDeckWriteLimiter, saveArenaV2DeckController);
-router.patch('/arena/decks/:deck_id', authMiddleware, banCheckMiddleware, arenaDeckWriteLimiter, updateArenaV2DeckController);
-router.delete('/arena/decks/:deck_id', authMiddleware, banCheckMiddleware, arenaDeckWriteLimiter, deleteArenaV2DeckController);
-router.post('/arena/decks/:deck_id/validate', authMiddleware, banCheckMiddleware, arenaReadLimiter, revalidateArenaV2DeckController);
-router.post('/arena/reports', authMiddleware, banCheckMiddleware, arenaStreamerConfigLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/reports/mine', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/streamer-right-requests', authMiddleware, banCheckMiddleware, arenaStreamerConfigLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/streamer-right-requests/mine', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/matchmaking/quick/join', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickJoinLimiter, joinArenaV2QuickQueueController);
-router.get('/arena/matchmaking/quick/status', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, getMyArenaV2QuickQueueStatusController);
-router.post('/arena/matchmaking/quick/accept', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickAcceptLimiter, acceptMyArenaV2QuickQueueController);
-router.get('/arena/matchmaking/quick/events', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/matchmaking/quick/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, cancelMyArenaV2QuickQueueController);
-router.post('/arena/matches', authMiddleware, banCheckMiddleware, arenaBotMatchLimiter, createArenaV2MatchController);
-router.post('/arena/bot-matches', authMiddleware, banCheckMiddleware, arenaBotMatchLimiter, createArenaV2BotMatchController);
-router.get('/arena/matches/active', authMiddleware, banCheckMiddleware, arenaReadLimiter, getActiveArenaV2MatchController);
-router.get('/arena/matches/recent', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/matches/:match_id/mulligan', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2MulliganController);
-router.post('/arena/matches/:match_id/turn-action', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2TurnActionsController);
-router.post('/arena/matches/:match_id/actions', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2TurnActionsController);
-router.post('/arena/matches/:match_id/emotes', authMiddleware, banCheckMiddleware, arenaCosmeticWriteLimiter, sendArenaEmote);
-router.post('/arena/matches/:match_id/abandon-bot', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, abandonArenaV2BotMatchController);
-router.post('/arena/matches/:match_id/surrender', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, surrenderArenaV2MatchController);
-router.post('/arena/matches/:match_id/rounds/commit', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/matches/:match_id', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2MatchController);
-router.get('/arena/matches/:match_id/replay', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2ReplayController);
-router.post('/arena/matches/:match_id/share', authMiddleware, banCheckMiddleware, arenaShareLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/spectator/share/:token', arenaSpectatorLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/profile/me', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2CurrentRewardsController);
-router.get('/arena/profile/:user_id', arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.get('/arena/rankings', arenaReadLimiter, listArenaV2RankingsController);
-router.get('/arena/rewards/current', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2CurrentRewardsController);
-router.get('/arena/streamer-card/me', authMiddleware, banCheckMiddleware, arenaReadLimiter, getMyArenaV2StreamerCardController);
-router.patch('/arena/streamer-card/me', authMiddleware, banCheckMiddleware, arenaStreamerConfigLimiter, updateMyArenaV2StreamerCardController);
-router.post('/arena/streamer-card/me/disable', authMiddleware, banCheckMiddleware, arenaStreamerToggleLimiter, disableMyArenaV2StreamerCardController);
-router.post('/arena/streamer-card/me/enable', authMiddleware, banCheckMiddleware, arenaStreamerToggleLimiter, enableMyArenaV2StreamerCardController);
-
-// ==========================================
 
 // ==========================================
 // 1. 스트리머 관련 기능

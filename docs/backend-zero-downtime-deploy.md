@@ -37,7 +37,6 @@ backend/.env.live-worker
 backend/.env.scheduler-worker
 backend/.env.backup-worker
 backend/.env.image-worker
-backend/.env.arena-worker
 ```
 
 GitHub Actions 아티팩트에는 `.env`가 포함되지 않습니다.
@@ -108,9 +107,9 @@ cd /home/ubuntu/ChzzkCardTradeView
 ./deploy.sh /home/ubuntu/ChzzkCardTradeView/backend-release-<sha>.tar.gz
 ```
 
-## 긴급 롤백
+## 실패한 배포의 긴급 롤백
 
-직전 dist는 `backend/dist.prev`에 남습니다.
+새 API 헬스체크 또는 워커 reload 전에 배포가 중단되면 직전 dist가 `backend/dist.prev`에 남습니다. 정상 배포가 끝나면 이 임시 롤백 디렉터리는 정리됩니다.
 
 ```bash
 cd /home/ubuntu/ChzzkCardTradeView

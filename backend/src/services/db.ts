@@ -5,7 +5,6 @@ import path from 'path';
 import { ensureParentDirectory, getSqliteDbPath } from './storagePaths';
 import { createMysqlDb, MysqlDb } from './mysqlDb';
 import { createPostgresDb, PostgresDb } from './postgresDb';
-import { ensureArenaV2MysqlSchema, ensureArenaV2SqliteSchema } from './arenaV2SchemaMigration';
 
 let sqliteDb: Database.Database | null = null;
 let supabaseClient: SupabaseClient | null = null;
@@ -960,11 +959,6 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
     user_image_blinds: 'uniq_user_image_blinds_key',
     link_previews: 'uniq_link_previews_hash',
     puzzle_excluded_images: 'uniq_puzzle_excluded_images_key',
-    arena_worker_heartbeats: 'uniq_arena_worker_heartbeats_worker',
-    arena_user_cosmetic_loadouts: 'uniq_arena_user_cosmetic_loadouts_user',
-    arena_cup_replays: 'uniq_arena_cup_replays_cup',
-    arena_match_replays: 'uniq_arena_match_replays_match',
-    arena_player_ratings: 'uniq_arena_player_ratings_user',
     notifications: 'uniq_notifications_group_key',
     market_watches: 'uniq_market_watches_user_channel_star',
     market_transaction_audit_logs: 'uniq_market_audit_key',
@@ -1312,11 +1306,6 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await dedupeRows('user_image_blinds', 'user_id, image_key', 'created_at DESC NULLS LAST');
   await dedupeRows('link_previews', 'url_hash', 'fetched_at DESC NULLS LAST');
   await dedupeRows('puzzle_excluded_images', 'image_key', 'id DESC');
-  await dedupeRows('arena_worker_heartbeats', 'worker_id', 'heartbeat_at DESC NULLS LAST');
-  await dedupeRows('arena_user_cosmetic_loadouts', 'user_id', 'updated_at DESC NULLS LAST');
-  await dedupeRows('arena_cup_replays', 'cup_id', 'updated_at DESC NULLS LAST');
-  await dedupeRows('arena_match_replays', 'match_id', 'updated_at DESC NULLS LAST');
-  await dedupeRows('arena_player_ratings', 'season_id, user_id', 'rating_points DESC, mmr DESC, updated_at DESC NULLS LAST');
   await dedupeRows('notifications', 'user_id, group_key', 'created_at DESC NULLS LAST, id DESC', 'group_key IS NOT NULL');
   await dedupeRows('market_watches', 'user_id, channel_id, star', 'created_at DESC NULLS LAST, id DESC');
   await dedupeRows('market_transaction_audit_logs', 'audit_key', 'recorded_at DESC NULLS LAST, id DESC');
@@ -1348,11 +1337,6 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_image_blinds_key ON user_image_blinds (user_id, image_key)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_link_previews_hash ON link_previews (url_hash)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_puzzle_excluded_images_key ON puzzle_excluded_images (image_key)');
-  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_worker_heartbeats_worker ON arena_worker_heartbeats (worker_id)');
-  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_user_cosmetic_loadouts_user ON arena_user_cosmetic_loadouts (user_id)');
-  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_cup_replays_cup ON arena_cup_replays (cup_id)');
-  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_match_replays_match ON arena_match_replays (match_id)');
-  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_player_ratings_user ON arena_player_ratings (season_id, user_id)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications (user_id, group_key) WHERE group_key IS NOT NULL');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_watches_user_channel_star ON market_watches (user_id, channel_id, star)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_audit_key ON market_transaction_audit_logs (audit_key)');
@@ -1458,7 +1442,6 @@ export const initDatabaseConnection = async (
     await db.get('SELECT 1 AS ok');
     if (runCompatibilityMigrations) {
       await ensureMysqlCompatibilityMigrations(db);
-      await ensureArenaV2MysqlSchema(db);
     }
     dbMode = 'MYSQL';
     sqlDialect = 'mysql';
@@ -1471,7 +1454,6 @@ export const initDatabaseConnection = async (
     await mysqlDb.get('SELECT 1 AS ok');
     if (runCompatibilityMigrations) {
       await ensurePostgresCompatibilityMigrations(mysqlDb as PostgresDb);
-      await ensureArenaV2MysqlSchema(mysqlDb as PostgresDb);
     }
     dbMode = 'MYSQL';
     sqlDialect = 'postgres';
@@ -2383,8 +2365,6 @@ export const initDatabaseConnection = async (
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_end_at', '')").run();
-      ensureArenaV2SqliteSchema(sqliteDb);
-
       try {
         ensureSqliteCompatibilityConstraints(sqliteDb);
         sqliteDb.pragma('foreign_keys = ON');

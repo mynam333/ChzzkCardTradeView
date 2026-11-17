@@ -4,9 +4,5 @@ export const getRealtimeTopicsForPathname = (pathname: string): string => {
     topics.add('shop');
     topics.add('market');
   }
-  if (pathname.startsWith('/arena')) {
-    topics.add('arena');
-    topics.add('shop');
-  }
   return Array.from(topics).join(',');
 };

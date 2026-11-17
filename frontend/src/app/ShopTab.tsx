@@ -474,7 +474,7 @@ export const ShopTab: React.FC = () => {
       const res = await apiFetch('/shop/items');
       if (res.ok) {
         const payload: unknown = await res.json();
-        setItems(Array.isArray(payload) ? payload as ShopItem[] : []);
+        setItems(Array.isArray(payload) ? payload.filter((item): item is ShopItem => item?.type === 'border' || item?.type === 'name_effect') : []);
       }
     } catch { /* noop */ }
   };

@@ -141,22 +141,7 @@ const CORE_TABLE_ORDER = [
   'achievements',
   'achievement_events',
   'achievement_grant_logs',
-  'achievement_evaluation_queue',
-  'arena_decks',
-  'arena_matches',
-  'arena_player_ratings',
-  'arena_match_replays',
-  'arena_rank_snapshots',
-  'arena_match_queue',
-  'arena_cups',
-  'arena_cup_replays',
-  'arena_cup_queue',
-  'arena_admin_stat_snapshots',
-  'arena_admin_jobs',
-  'arena_admin_audit_logs',
-  'arena_spectator_links',
-  'arena_user_cosmetic_loadouts',
-  'arena_worker_heartbeats'
+  'achievement_evaluation_queue'
 ];
 
 const PLACEHOLDER_USER_STATUS = '__mysql_to_postgres_placeholder_user__';
@@ -188,15 +173,7 @@ const USER_REFERENCE_COLUMNS = {
   chat_attachments: ['owner_user_id'],
   achievement_events: ['user_id'],
   achievement_grant_logs: ['user_id'],
-  achievement_evaluation_queue: ['user_id'],
-  arena_decks: ['user_id'],
-  arena_matches: ['player_a_id', 'player_b_id', 'winner_user_id'],
-  arena_player_ratings: ['user_id'],
-  arena_match_queue: ['user_id'],
-  arena_cup_queue: ['user_id'],
-  arena_admin_audit_logs: ['actor_user_id'],
-  arena_spectator_links: ['owner_user_id'],
-  arena_user_cosmetic_loadouts: ['user_id']
+  achievement_evaluation_queue: ['user_id']
 };
 
 const splitSqlStatements = (sql) => {
