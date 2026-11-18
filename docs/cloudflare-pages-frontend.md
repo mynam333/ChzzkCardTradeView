@@ -18,14 +18,14 @@ NEXT_PUBLIC_API_URL=https://api.yuaru.com/api
 
 ## Cloudflare Pages 설정
 
-Pages 프로젝트를 GitHub 저장소와 연결한다.
+2026-11-18 기준 Pages 프로젝트는 Git 연결 없이 GitHub Actions의 Wrangler 업로드로 배포한다. 현재 설정은 `.github/workflows/deploy-frontend.yml`을 따른다.
 
 ```text
-Project name: chzzk-card-trade-view-frontend
+Project name: chikapo
 Production branch: main
-Root directory: /
-Build command: pnpm run build:frontend
-Build output directory: frontend/out
+Build command: pnpm --filter frontend build
+Upload directory: frontend/out
+Deployment: wrangler pages deploy frontend/out --project-name chikapo --branch main
 ```
 
 환경 변수:
@@ -45,26 +45,7 @@ PNPM_VERSION=10
 
 ## Branch Controls
 
-빌드 횟수를 줄이기 위해 main만 자동 배포한다.
-
-```text
-Production branch: main
-Enable automatic production branch deployments: ON
-```
-
-초기 안정화 기간에는 preview build를 끈다.
-
-```text
-Preview deployments: None
-```
-
-dev 브랜치 미리보기가 필요하면 다음처럼 제한한다.
-
-```text
-Preview deployments: Custom branches
-Include preview branches: dev
-Exclude preview branches: 비움
-```
+운영 자동 배포는 GitHub Actions의 `main` push와 경로 필터로 제어한다. 수동 배포는 같은 워크플로의 `workflow_dispatch`를 사용한다. Pages 대시보드의 Git 빌드 설정으로 제어하는 구조가 아니다.
 
 ## Vercel Dev 도메인
 
@@ -111,3 +92,21 @@ Cloudflare Pages 빌드는 `DEPLOY_TARGET=cloudflare-pages`일 때 `next.config.
 정적 export에서는 Next API routes를 사용할 수 없다. 프론트 API route는 백엔드 API로 옮기거나 정적 파일로 대체한다.
 
 현재 점검 페이지의 공사중 이미지는 `frontend/public/construction`의 정적 파일 목록을 클라이언트에서 선택한다.
+
+## Retired URLs
+
+2026-11-18 아레나 소스·정적 자산·백엔드 API를 제거했다. Pages 기본 주소에서는 404였지만 사용자 도메인의 정확한 `/arena` 주소에서 이전 HTML이 반환되었다. URL 3개 및 `chikapo.yuaru.com` 호스트 캐시 제거 요청은 성공했으나 이전 응답이 남아, 폐기된 주소를 Cloudflare 단일 리디렉션으로 처리한다. 캐시의 정확한 내부 계층은 확인되지 않았다.
+
+- 규칙: `치카포 종료된 아레나 주소 이동`
+- 규칙 ID: `bd7f1f8f0e374c87bc9fe03ae7e6cf40`
+- 위치: `yuaru.com` → 규칙 → 리디렉션 규칙, 기존 HTTPS·cctv 규칙 뒤
+- 응답: `301` → `https://chikapo.yuaru.com/achievements`, 쿼리 문자열 유지 안 함
+- 조건:
+
+```text
+(http.host eq "chikapo.yuaru.com" and (http.request.uri.path eq "/arena" or http.request.uri.path eq "/arena.html" or starts_with(http.request.uri.path, "/arena/")))
+```
+
+이는 폐기된 주소의 안내 규칙이며 게임 실행 코드는 포함하지 않는다. `/arenax`, API 호스트 및 다른 사이트에는 적용되지 않는다. 아레나 API는 계속 404를 반환한다.
+
+캐시 제거 워크플로 `.github/workflows/purge-frontend-cache.yml`은 수동 실행 전용이다. 현재 배포 토큰에는 zone 캐시 삭제 권한이 없어 실패한다. Pages 업로드 성공 또는 캐시 삭제 접수만으로 완료를 판정하지 말고, 실제 사용자 도메인의 상태 코드·Location·최종 응답을 확인한다.
