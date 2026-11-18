@@ -97,16 +97,16 @@ Cloudflare Pages 빌드는 `DEPLOY_TARGET=cloudflare-pages`일 때 `next.config.
 
 2026-11-18 아레나 소스·정적 자산·백엔드 API를 제거했다. Pages 기본 주소에서는 404였지만 사용자 도메인의 정확한 `/arena` 주소에서 이전 HTML이 반환되었다. URL 3개 및 `chikapo.yuaru.com` 호스트 캐시 제거 요청은 성공했으나 이전 응답이 남아, 폐기된 주소를 Cloudflare 단일 리디렉션으로 처리한다. 캐시의 정확한 내부 계층은 확인되지 않았다.
 
-- 규칙: `치카포 종료된 아레나 주소 이동`
+- 규칙: `치카포 종료된 아레나 404 이동`
 - 규칙 ID: `bd7f1f8f0e374c87bc9fe03ae7e6cf40`
 - 위치: `yuaru.com` → 규칙 → 리디렉션 규칙, 기존 HTTPS·cctv 규칙 뒤
-- 응답: `301` → `https://chikapo.yuaru.com/achievements`, 쿼리 문자열 유지 안 함
+- 응답: `301` → `https://chikapo.yuaru.com/not-found` → 최종 `404`, 쿼리 문자열 유지 안 함
 - 조건:
 
 ```text
 (http.host eq "chikapo.yuaru.com" and (http.request.uri.path eq "/arena" or http.request.uri.path eq "/arena.html" or starts_with(http.request.uri.path, "/arena/")))
 ```
 
-이는 폐기된 주소의 안내 규칙이며 게임 실행 코드는 포함하지 않는다. `/arenax`, API 호스트 및 다른 사이트에는 적용되지 않는다. 아레나 API는 계속 404를 반환한다.
+이는 폐기된 주소의 404 이동 규칙이며 게임 실행 코드는 포함하지 않는다. `/arenax`, API 호스트 및 다른 사이트에는 적용되지 않는다. 아레나 API는 계속 404를 반환한다. `/404`는 정적 파일로 제공되어 HTTP 200이므로, 실제 HTTP 404를 반환하는 `/not-found`를 대상으로 사용한다.
 
 캐시 제거 워크플로 `.github/workflows/purge-frontend-cache.yml`은 수동 실행 전용이다. 현재 배포 토큰에는 zone 캐시 삭제 권한이 없어 실패한다. Pages 업로드 성공 또는 캐시 삭제 접수만으로 완료를 판정하지 말고, 실제 사용자 도메인의 상태 코드·Location·최종 응답을 확인한다.
