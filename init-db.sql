@@ -593,6 +593,7 @@ CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
 CREATE INDEX IF NOT EXISTS idx_market_audit_listing ON market_transaction_audit_logs(listing_id, event_type);
 CREATE INDEX IF NOT EXISTS idx_market_audit_user ON market_transaction_audit_logs(related_user_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_market_audit_participants ON market_transaction_audit_logs(seller_id, buyer_id, current_bidder_id);
+CREATE INDEX IF NOT EXISTS idx_market_audit_buyer ON market_transaction_audit_logs(buyer_id, event_type, seller_id);
 
 CREATE TABLE IF NOT EXISTS market_bids (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

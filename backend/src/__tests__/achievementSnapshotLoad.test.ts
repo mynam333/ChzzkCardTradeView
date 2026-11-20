@@ -118,6 +118,21 @@ describe('achievement database load', () => {
     expect(mocks.db.run.mock.calls.some(([sql]) => /INSERT INTO user_achievements\s/.test(sql))).toBe(false);
   });
 
+  it('writes a win and its mastery counters together and skips duplicate settlements', async () => {
+    const { ensureAchievementTables, recordAchievementEvent } = await import('../services/achievementService');
+    await ensureAchievementTables();
+    mocks.db.run.mockClear();
+    const event = { userId: 'owner', eventKey: 'minigame:success:owner:one', eventType: 'minigame.success',
+      stats: { 'minigame.success.count': 1, 'minigame.success.quiz.count': 1, 'minigame.perfect.count': 1 }, evaluate: false };
+    await recordAchievementEvent(event);
+    const writes = mocks.db.run.mock.calls.filter(([sql]) => sql.includes('INSERT INTO user_achievement_stats'));
+    expect(writes).toHaveLength(1);
+    expect(writes[0].slice(1)).toEqual(['owner', 'minigame.success.count', 1, 'owner', 'minigame.success.quiz.count', 1, 'owner', 'minigame.perfect.count', 1]);
+    mocks.db.run.mockClear().mockResolvedValueOnce({ changes: 0 });
+    await recordAchievementEvent(event);
+    expect(mocks.db.run.mock.calls.some(([sql]) => sql.includes('INSERT INTO user_achievement_stats'))).toBe(false);
+  });
+
   it('refreshes snapshots once when an event requests evaluation and refresh together', async () => {
     const { ensureAchievementTables, recordAchievementEvent } = await import('../services/achievementService');
     await ensureAchievementTables();

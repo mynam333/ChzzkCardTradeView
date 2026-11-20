@@ -1624,6 +1624,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
     let isCorrect = false;
     let earnedPoints = 0;
+    let achievementBonus: 'perfect' | 'speed_bonus' | undefined;
     let message = '아쉽게도 정답이 아닙니다!';
     const formatPoints = (points: number) => points.toLocaleString('ko-KR');
 
@@ -1695,6 +1696,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
         // 30초 내 퍼즐 완성 시 현재 세션에 고정된 보너스를 지급합니다.
         if (completedWithinBonusTime(serverElapsedMs, 'puzzle', 30_000)) {
+          achievementBonus = 'speed_bonus';
           earnedPoints += rewardConfig.bonusPoints;
           message = rewardConfig.bonusPoints > 0
             ? `30초 내로 퍼즐을 완성하셨습니다! 보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함하여 총 ${formatPoints(earnedPoints)} P 획득!`
@@ -1753,6 +1755,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
         // 10초 내 완료 시 현재 세션에 고정된 보너스를 지급합니다.
         if (completedWithinBonusTime(serverElapsedMs, 'match', 10_000)) {
+          achievementBonus = 'speed_bonus';
           earnedPoints += rewardConfig.bonusPoints;
           message = rewardConfig.bonusPoints > 0
             ? `10초 내에 짝을 맞추셨습니다! 보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함하여 총 ${formatPoints(earnedPoints)} P 획득!`
@@ -1817,6 +1820,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         earnedPoints = rewardConfig.successPoints;
 
         if (score.perfect) {
+          achievementBonus = 'perfect';
           earnedPoints += rewardConfig.bonusPoints;
           message = rewardConfig.bonusPoints > 0
             ? `${gameLabel} 5문제를 모두 맞추셨습니다! 보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함하여 총 ${formatPoints(earnedPoints)} P 획득!`
@@ -1842,6 +1846,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       earned_points: earnedPoints,
       message,
       practice_mode: practiceMode,
+      ...(achievementBonus && !practiceMode ? { achievement_bonus: achievementBonus } : {}),
       answer
     };
     const completeResult = await minigameRepository.completeSession(
@@ -1882,6 +1887,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         : undefined;
 
     if (settledNow && authoritativeCorrect && !authoritativePracticeMode) {
+      const bonus = authoritativeResult.achievement_bonus;
       recordAchievementEvent({
         userId,
         eventType: 'minigame.success',
@@ -1889,7 +1895,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         metadata: { session_id, game_type: session.game_type, earned_points: authoritativeEarnedPoints },
         stats: {
           'minigame.success.count': 1,
-          [`minigame.success.${session.game_type}.count`]: 1
+          [`minigame.success.${session.game_type}.count`]: 1,
+          ...(bonus === 'perfect' || bonus === 'speed_bonus' ? { [`minigame.${bonus}.count`]: 1 } : {})
         },
         refreshSnapshots: true
       }).catch(() => undefined);

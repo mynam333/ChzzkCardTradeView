@@ -166,4 +166,59 @@ describe('expanded permanent achievements', () => {
     expect(after.find(a => a.code === 'mission_full_week')?.status).toBe('completed');
     expect(after.find(a => a.code === 'mission_four_full_weeks')).toMatchObject({ status: 'in_progress', progress_current: 1, progress_target: 4 });
   });
+
+  it('counts distinct market partners across archived and live sales, with no credit for duplicate or unfinished trades', async () => {
+    const audit = db.prepare('INSERT INTO market_transaction_audit_logs(audit_key, event_type, seller_id, buyer_id) VALUES (?, ?, ?, ?)');
+    for (let i = 0; i < 97; i++) audit.run('sold-' + i, 'sold', owner, 'buyer-' + i);
+    db.prepare("INSERT INTO market_transaction_audit_logs(audit_key, event_type, status, seller_id, buyer_id) VALUES ('removed-card', 'streamer_deleted', 'SOLD', ?, 'buyer-97')").run(owner);
+    audit.run('returning-customer', 'sold', owner, 'buyer-0');
+    audit.run('pending-at-deletion', 'account_deleted', owner, 'other');
+    audit.run('someone-elses-sale', 'sold', 'other', 'buyer-x');
+    audit.run('purchase-archived', 'sold', 'vendor', owner);
+    audit.run('same-vendor-again', 'sold', 'vendor', owner);
+    db.prepare("INSERT INTO streamers(channel_id, name) VALUES ('ch', '카드')").run();
+    db.prepare("INSERT INTO user_cards(user_id, channel_id, serial_number) VALUES (?, 'ch', 1)").run(owner);
+    const addUser = db.prepare('INSERT INTO users(id,username) VALUES (?,?)');
+    for (const id of ['buyer-0', 'buyer-98', 'other', 'vendor', 'vendor-2']) addUser.run(id, id);
+    const listing = db.prepare('INSERT INTO market_listings(seller_id, buyer_id, user_card_id, price, status) VALUES (?, ?, 1, 100, ?)');
+    listing.run(owner, 'buyer-0', 'SOLD');
+    listing.run(owner, 'buyer-98', 'SOLD');
+    listing.run(owner, 'other', 'CANCELLED');
+    listing.run('vendor', owner, 'SOLD');
+    listing.run('vendor-2', owner, 'SOLD');
+    const market = (await listUserAchievements(owner)).items;
+    expect(market.find(a => a.code === 'legend_market_customers')).toMatchObject({ status: 'in_progress', progress_current: 99 });
+    expect(market.find(a => a.code === 'legend_market_scout')).toMatchObject({ progress_current: 3 });
+    expect(market.find(a => a.code === 'market_both_sides')).toMatchObject({ progress_current: 4 });
+    audit.run('hundredth', 'sold', owner, 'buyer-99');
+    const completed = (await listUserAchievements(owner)).items.find(a => a.code === 'legend_market_customers')!;
+    expect(completed.status).toBe('completed');
+    expect((await claimAchievementReward(owner, completed.achievement_id)).reason).toBe('OK');
+    expect(db.prepare('SELECT point, bonus_free_draw_tickets FROM users WHERE id = ?').get(owner))
+      .toEqual({ point: 16000, bonus_free_draw_tickets: 3 });
+    expect((await claimAchievementReward(owner, completed.achievement_id)).reason).toBe('ALREADY_CLAIMED');
+  });
+
+  it('credits existing wins in all five games and requires the final game to reach its own target', async () => {
+    const legends = (await listAchievements()).filter(a => a.code.startsWith('legend_'));
+    expect(legends).toHaveLength(24);
+    expect(new Set(legends.map(a => a.category)).size).toBe(10);
+    expect(legends.filter(a => a.is_hidden)).toHaveLength(2);
+    expect(legends.every(a => a.tier === 'legendary' && a.repeat_policy === 'once' && a.claim_policy === 'manual')).toBe(true);
+    const stat = db.prepare('INSERT INTO user_achievement_stats(user_id,stat_key,stat_value) VALUES (?,?,?)');
+    for (const game of ['quiz', 'match', 'fan_meeting', 'streamer_catch']) stat.run(owner, 'minigame.success.' + game + '.count', 500);
+    stat.run(owner, 'minigame.success.sequence_relay.count', 249);
+    const before = (await listUserAchievements(owner)).items;
+    expect(before.find(a => a.code === 'legend_arcade_champion')).toMatchObject({ status: 'in_progress', progress_current: 1249, progress_target: 1250 });
+    for (const hidden of legends.filter(a => a.is_hidden)) {
+      expect(before.find(a => a.achievement_id === hidden.id)).toMatchObject({ name: '???', code: null, rewards: null });
+    }
+    db.prepare("UPDATE user_achievement_stats SET stat_value = 250 WHERE user_id = ? AND stat_key = 'minigame.success.sequence_relay.count'").run(owner);
+    const after = (await listUserAchievements(owner)).items.find(a => a.code === 'legend_arcade_champion')!;
+    expect(after.status).toBe('completed');
+    const claims = await Promise.all([claimAchievementReward(owner, after.achievement_id), claimAchievementReward(owner, after.achievement_id)]);
+    expect(claims.map(c => c.reason).sort()).toEqual(['ALREADY_CLAIMED', 'OK']);
+    expect(db.prepare('SELECT point, bonus_free_draw_tickets FROM users WHERE id = ?').get(owner)).toEqual({ point: 16000, bonus_free_draw_tickets: 3 });
+    expect(db.prepare('SELECT bonus_tickets FROM user_minigame_tickets WHERE user_id = ?').pluck().get(owner)).toBe(10);
+  });
 });

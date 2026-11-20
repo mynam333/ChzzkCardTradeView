@@ -2219,6 +2219,7 @@ export const initDatabaseConnection = async (
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_listing ON market_transaction_audit_logs(listing_id, event_type);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_user ON market_transaction_audit_logs(related_user_id, recorded_at);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_participants ON market_transaction_audit_logs(seller_id, buyer_id, current_bidder_id);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_buyer ON market_transaction_audit_logs(buyer_id, event_type, seller_id);`);
 
       // 미니게임 티켓 및 세션 테이블 생성
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS user_minigame_tickets (

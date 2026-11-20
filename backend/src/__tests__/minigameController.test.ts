@@ -1,6 +1,9 @@
 import { Response } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthenticatedRequest } from '../middlewares/admin';
+import { recordAchievementEvent } from '../services/achievementService';
+
+vi.mock('../services/achievementService', () => ({ recordAchievementEvent: vi.fn(async () => undefined) }));
 
 vi.mock('../repositories', () => ({
   minigameRepository: {
@@ -527,6 +530,7 @@ describe('round-based minigames', () => {
       earned_points: 0,
       practice_mode: true
     }));
+    expect(recordAchievementEvent).not.toHaveBeenCalled();
   });
 
   it('rejects round answers that are not one of the issued choices', async () => {
@@ -1068,6 +1072,9 @@ describe('authoritative paid minigame activation contract', () => {
     } as AuthenticatedRequest, response);
 
     expect(completeSession).toHaveBeenCalledWith('paid-quiz-stored-progress', 1200, expect.any(String));
+    expect(recordAchievementEvent).toHaveBeenCalledWith(expect.objectContaining({
+      stats: { 'minigame.success.count': 1, 'minigame.success.quiz.count': 1, 'minigame.perfect.count': 1 }
+    }));
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ correct: true, earned_points: 1200 }));
   });
 
@@ -1104,6 +1111,23 @@ describe('authoritative paid minigame activation contract', () => {
       correct: true,
       earned_points: 1850,
       message: expect.stringContaining('350 P')
+    }));
+  });
+
+  it.each([4, 5])('records %i correct quiz answers accurately when both point rewards are zero', async correctAnswers => {
+    const sessionId = 'zero-points-quiz';
+    findSessionById.mockResolvedValue({
+      id: sessionId, user_id: 'user-1', game_type: 'quiz', status: 'STARTED', validation_version: 1,
+      target_data: JSON.stringify({ practice_mode: false, reward_config: { success_points: 0, bonus_points: 0 }, rounds: quizRounds }),
+      progress_data: JSON.stringify({ round_outcomes: quizRounds.map((round, index) => ({
+        round: index, selected_channel_id: index < correctAnswers ? round.answer_channel_id : null
+      })) }),
+      progress_revision: 5, created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+    await submitMinigameResult({ user: { id: 'user-1' }, body: { session_id: sessionId } } as AuthenticatedRequest, createResponse());
+    expect(completeSession).toHaveBeenCalledWith(sessionId, 0, expect.any(String));
+    expect(recordAchievementEvent).toHaveBeenCalledWith(expect.objectContaining({
+      stats: { 'minigame.success.count': 1, 'minigame.success.quiz.count': 1, ...(correctAnswers === 5 ? { 'minigame.perfect.count': 1 } : {}) }
     }));
   });
 
@@ -1182,6 +1206,7 @@ describe('authoritative paid minigame activation contract', () => {
       new_balance: 5000,
       message: '먼저 확정된 결과입니다.'
     }));
+    expect(recordAchievementEvent).not.toHaveBeenCalled();
   });
 
   it('returns the stored completed result instead of regrading a replay payload', async () => {
@@ -1287,6 +1312,9 @@ describe('authoritative paid minigame activation contract', () => {
     } as AuthenticatedRequest, response);
 
     expect(completeSession).toHaveBeenCalledWith('paid-puzzle-server-time', 1000, expect.any(String));
+    expect(recordAchievementEvent).toHaveBeenCalledWith(expect.objectContaining({
+      stats: { 'minigame.success.count': 1, 'minigame.success.puzzle.count': 1 }
+    }));
   });
 
   it('rejects an over-cap puzzle transcript before doing unbounded replay work', async () => {
@@ -1370,6 +1398,9 @@ describe('authoritative paid minigame activation contract', () => {
     } as AuthenticatedRequest, response);
 
     expect(completeSession).toHaveBeenCalledWith('paid-match-proof', 1200, expect.any(String));
+    expect(recordAchievementEvent).toHaveBeenCalledWith(expect.objectContaining({
+      stats: { 'minigame.success.count': 1, 'minigame.success.match.count': 1, 'minigame.speed_bonus.count': 1 }
+    }));
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ correct: true, earned_points: 1200 }));
   });
 

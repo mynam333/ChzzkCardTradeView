@@ -26,7 +26,8 @@ const together = (targets: Record<string, number>): Goal => ({
 });
 const points = (amount: number): AchievementReward => ({ type: 'point', points: amount });
 const playTickets = (quantity: number): AchievementReward => ({ type: 'minigame_ticket', quantity });
-const drawTicket: AchievementReward = { type: 'free_draw_ticket', quantity: 1 };
+const drawTickets = (quantity: number): AchievementReward => ({ type: 'free_draw_ticket', quantity });
+const drawTicket = drawTickets(1);
 
 const groups: { category: AchievementCategory; icon: string; color: string; entries: Entry[] }[] = [
   { category: 'start', icon: 'Contact', color: '#0891b2', entries: [
@@ -217,7 +218,114 @@ const groups: { category: AchievementCategory; icon: string; color: string; entr
   ] }
 ];
 
-export const additionalAchievements = groups.flatMap(({ category, icon, color, entries }) =>
+const legendaryByCategory: Partial<Record<AchievementCategory, Omit<Entry, 'tier'>[]>> = {
+  attendance: [
+    { code: 'legend_rain_or_shine', name: '비가 오나 눈이 오나',
+      description: '하루도 빠짐없이 400일 연속 출석하세요.',
+      goal: snapshot('login.max_streak_days', 400), rewards: [drawTickets(4), points(15000)] },
+    { code: 'legend_two_years', name: '어느덧 2년',
+      description: '출석한 날이 모두 730일이면 달성합니다. 중간에 쉬어도 괜찮아요.',
+      goal: counter('login.daily.count', 730), rewards: [drawTickets(5), points(20000)] }
+  ],
+  collection: [
+    { code: 'legend_card_library', name: '없는 게 없는 카드첩',
+      description: '스트리머 2,000종을 포함해 카드 10,000장을 한 보관함에 모으세요.',
+      goal: together({ 'inventory.card_count': 10000, 'inventory.unique_streamer_count': 2000 }), rewards: [drawTickets(5), points(20000)] },
+    { code: 'legend_first_editions', name: '초판본 컬렉터',
+      description: '시리얼 10번 이하 카드 250장을 소장하세요. 그중 25장은 시리얼 1번이어야 합니다.',
+      goal: together({ 'inventory.low_serial.10.count': 250, 'inventory.low_serial.1.count': 25 }), rewards: [drawTickets(3), points(10000)] },
+    { code: 'legend_every_star', name: '한 등급도 빠짐없이',
+      description: '0성부터 5성까지, 여섯 등급의 카드를 각각 50장씩 동시에 보관하세요.',
+      goal: together({ 'inventory.star.0.count': 50, 'inventory.star.1.count': 50, 'inventory.star.2.count': 50,
+        'inventory.star.3.count': 50, 'inventory.star.4.count': 50, 'inventory.star.5.count': 50 }), rewards: [drawTickets(3), points(12000)] }
+  ],
+  growth: [
+    { code: 'legend_thousand_fusions', name: '천 번의 담금질',
+      description: '한계돌파를 1,000번 성공시키고 5성 카드 25장을 소장하세요.',
+      goal: together({ 'card.fused.count': 1000, 'inventory.star.5.count': 25 }), rewards: [drawTickets(3), points(12000)] },
+    { code: 'legend_starry_sky', name: '별이 쏟아진다',
+      description: '보관함의 별을 모두 더해 3,000개를 채우고, 5성 카드만 100장을 모으세요.',
+      goal: together({ 'inventory.total_star_sum': 3000, 'inventory.star.5.count': 100 }), rewards: [drawTickets(4), points(15000)] }
+  ],
+  economy: [
+    { code: 'legend_runway', name: '오늘은 패션쇼',
+      description: '보유 카드에 테두리 25개와 이름 이펙트 25개를 동시에 장착하세요.',
+      goal: together({ 'inventory.border_equipped_count': 25, 'inventory.name_effect_equipped_count': 25 }), rewards: [drawTickets(2), points(10000)] },
+    { code: 'legend_nest_egg', name: '소문난 알부자',
+      description: '포인트 잔액 500만 P와 총자산 2,500만 P를 동시에 달성하세요.',
+      goal: together({ 'user.point_balance': 5000000, 'user.total_asset': 25000000 }), rewards: [drawTickets(4), points(15000)] },
+    { code: 'legend_shop_turnover', name: '비우고 또 채우고',
+      description: '보관함에서 카드 3,000장을 판매하고 꾸미기 상점에서 40번 구매하세요.',
+      goal: together({ 'card.sold.count': 3000, 'shop.purchase.count': 40 }), rewards: [drawTickets(2), points(12000)] }
+  ],
+  trade: [
+    { code: 'legend_thousand_handshakes', name: '천 번의 악수',
+      description: '다른 수집가와 1:1 교환을 1,000번 성사시키세요.',
+      goal: counter('trade.completed.count', 1000), rewards: [drawTickets(3), points(15000)] },
+    { code: 'legend_trade_circle', name: '전국구 마당발',
+      description: '친구 30명을 사귀고 1:1 교환 300회와 오픈마켓 판매 75건을 달성하세요.',
+      goal: together({ 'community.friend_count': 30, 'trade.completed.count': 300, 'market.sale.count': 75 }), rewards: [drawTickets(2), points(12000)] }
+  ],
+  market: [
+    { code: 'legend_market_customers', name: '천객만래',
+      description: '오픈마켓에서 서로 다른 수집가 100명에게 카드를 판매하세요.',
+      goal: snapshot('market.distinct_buyer_count', 100), rewards: [drawTickets(3), points(15000)] },
+    { code: 'legend_market_scout', name: '발품의 달인',
+      description: '오픈마켓에서 서로 다른 판매자 75명에게 카드를 사고, 스트리머 카드 500종을 보유하세요.',
+      goal: together({ 'market.distinct_seller_count': 75, 'inventory.unique_streamer_count': 500 }), rewards: [drawTickets(2), points(12000)] },
+    { code: 'legend_market_volume', name: '장터의 큰손',
+      description: '오픈마켓에서 카드를 산 거래와 판 거래를 각각 500건 완료하세요.',
+      goal: together({ 'market.purchase.count': 500, 'market.sale.count': 500 }), rewards: [drawTickets(4), points(16000)] }
+  ],
+  minigame: [
+    { code: 'legend_arcade_champion', name: '오락실 끝판왕',
+      description: '정식 스트리머 퀴즈, 그림 짝맞추기, 팬 줄서기, 게스트 캐치, 순서 기억에서 각각 250번 성공하세요.',
+      goal: together({ 'minigame.success.quiz.count': 250, 'minigame.success.match.count': 250,
+        'minigame.success.fan_meeting.count': 250, 'minigame.success.streamer_catch.count': 250,
+        'minigame.success.sequence_relay.count': 250 }), rewards: [drawTickets(3), playTickets(10), points(15000)] },
+    { code: 'legend_perfect_score', name: '백발백중',
+      description: '정식 퀴즈에서 다섯 문제를 모두 맞힌 판을 100번 기록하세요. 이 업적이 추가된 뒤의 만점부터 셉니다.',
+      goal: counter('minigame.perfect.count', 100), rewards: [playTickets(6), points(10000)] },
+    { code: 'legend_speed_bonus', name: '눈 깜짝할 사이',
+      description: '정식 미니게임의 속도 보너스 기준을 75번 달성하세요. 그림 짝맞추기는 10초입니다. 이 업적이 추가된 뒤의 기록부터 셉니다.',
+      goal: counter('minigame.speed_bonus.count', 75), rewards: [playTickets(6), points(10000)] },
+    { code: 'legend_arcade_marathon', name: '고인물 인증',
+      description: '정식 미니게임에서 통산 5,000승을 거두세요.',
+      goal: counter('minigame.success.count', 5000), rewards: [drawTickets(4), playTickets(10), points(20000)] }
+  ],
+  community: [
+    { code: 'legend_collection_club', name: '소문난 수집가',
+      description: '친구 40명을 사귀고 스트리머 카드 1,000종을 모으세요. 보유 카드에는 이름 이펙트 15개를 장착하세요.',
+      goal: together({ 'community.friend_count': 40, 'inventory.unique_streamer_count': 1000, 'inventory.name_effect_equipped_count': 15 }),
+      rewards: [drawTickets(3), points(12000)] }
+  ],
+  event: [
+    { code: 'legend_mission_stamps', name: '도장판 한 권',
+      description: '주간 미션 보상을 누적 150번 수령하세요. 한 주에 다섯 개를 전부 끝내지 않아도 됩니다.',
+      goal: snapshot('weekly_mission.claimed_count', 150), rewards: [drawTickets(3), playTickets(5)] },
+    { code: 'legend_mission_year', name: '일 년 치 숙제 끝!',
+      description: '같은 주의 미션 보상 다섯 개를 모두 받은 주를 52번 채우세요. 쉬어 간 주가 있어도 됩니다.',
+      goal: snapshot('weekly_mission.full_week_count', 52), rewards: [drawTickets(5), playTickets(10), points(20000)] }
+  ],
+  hidden: [
+    { code: 'legend_private_gallery', name: '국보급 소장품',
+      description: '시리얼 1번 카드 50장과 5성 카드 50장을 한 보관함에 모으세요.',
+      hint: '맨 처음 나온 카드와 끝까지 키운 카드를 한자리에 모아 보세요.',
+      goal: together({ 'inventory.low_serial.1.count': 50, 'inventory.star.5.count': 50 }), rewards: [drawTicket] },
+    { code: 'legend_jack_of_all_trades', name: '못하는 게 뭐야?',
+      description: '1:1 교환 500회, 미니게임 1,000승, 한계돌파 1,000회와 주간 미션 12주 완주를 모두 달성하세요.',
+      hint: '교환대, 오락실, 한계돌파, 주간 미션에서 두루 실력을 쌓아 보세요.',
+      goal: together({ 'trade.completed.count': 500, 'minigame.success.count': 1000,
+        'card.fused.count': 1000, 'weekly_mission.full_week_count': 12 }), rewards: [points(8000), playTickets(2)] }
+  ]
+};
+
+// Append new groups after the original catalog to preserve existing sort orders on fresh installs.
+const legendaryGroups = groups.map(({ category, icon, color }) => ({
+  category, icon, color, entries: (legendaryByCategory[category] ?? []).map(entry => ({ ...entry, tier: 'legendary' as const }))
+}));
+
+export const additionalAchievements = [...groups, ...legendaryGroups].flatMap(({ category, icon, color, entries }) =>
   entries.map(({ goal, rewards, hint, ...entry }) => ({
     ...entry, category, icon, icon_color: color, ...goal, rewards_json: rewards,
     is_active: true, is_hidden: Boolean(hint), hidden_hint: hint ?? null,

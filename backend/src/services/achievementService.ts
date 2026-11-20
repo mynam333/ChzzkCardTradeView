@@ -194,6 +194,8 @@ const allowedMetrics = new Set([
   'market.active_auction_listing_count',
   'market.sold_listing_count',
   'market.bought_listing_count',
+  'market.distinct_buyer_count',
+  'market.distinct_seller_count',
   'market.active_bid_count',
   'market.watch_count',
   'shop.unique_purchase_count',
@@ -272,6 +274,8 @@ const metricConditionText: Record<string, (target: number) => string> = {
   'market.active_auction_listing_count': (target) => `마켓 경매 등록 ${target.toLocaleString()}건 유지`,
   'market.sold_listing_count': (target) => `마켓 판매 완료 ${target.toLocaleString()}건 달성`,
   'market.bought_listing_count': (target) => `마켓 구매 완료 ${target.toLocaleString()}건 달성`,
+  'market.distinct_buyer_count': (target) => `서로 다른 구매자 ${target.toLocaleString()}명에게 판매`,
+  'market.distinct_seller_count': (target) => `서로 다른 판매자 ${target.toLocaleString()}명에게서 구매`,
   'market.active_bid_count': (target) => `진행 중인 경매 입찰 ${target.toLocaleString()}건 보유`,
   'market.watch_count': (target) => `마켓 관심 알림 ${target.toLocaleString()}개 설정`,
   'shop.unique_purchase_count': (target) => `서로 다른 상점 아이템 ${target.toLocaleString()}종 구매`,
@@ -1357,6 +1361,27 @@ const achievementAndMissionCountsSql = `
       ) claimed_weeks
   ) missions`;
 
+// A sold card can leave the live listings table. Its settlement still identifies the trading partners.
+const sellerMarketStatsSql = `
+  SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
+         SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
+         SUM(CASE WHEN status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
+         SUM(CASE WHEN status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
+         COUNT(DISTINCT buyer_id) AS distinct_buyer_count
+    FROM (
+      SELECT status, listing_type, CASE WHEN status = 'SOLD' THEN buyer_id END AS buyer_id FROM market_listings WHERE seller_id = ?
+      UNION ALL
+      SELECT NULL, NULL, buyer_id FROM market_transaction_audit_logs WHERE seller_id = ? AND (event_type = 'sold' OR status = 'SOLD')
+    ) sales`;
+
+const buyerMarketStatsSql = `
+  SELECT SUM(live_listing) AS bought_listing_count, COUNT(DISTINCT seller_id) AS distinct_seller_count
+    FROM (
+      SELECT 1 AS live_listing, seller_id FROM market_listings WHERE buyer_id = ? AND status = 'SOLD'
+      UNION ALL
+      SELECT 0 AS live_listing, seller_id FROM market_transaction_audit_logs WHERE buyer_id = ? AND (event_type = 'sold' OR status = 'SOLD')
+    ) purchases`;
+
 export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   if (!userId) return;
@@ -1401,20 +1426,8 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
        WHERE uc.user_id = ? AND uc.quantity > 0
     `).get(userId) as any;
     const achievementStats = db.prepare(achievementAndMissionCountsSql).get(userId, userId) as any;
-    const sellerMarketStats = db.prepare(`
-      SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
-             SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
-             SUM(CASE WHEN status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
-             SUM(CASE WHEN status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count
-        FROM market_listings
-       WHERE seller_id = ?
-    `).get(userId) as any;
-    const buyerMarketStats = db.prepare(`
-      SELECT COUNT(*) AS bought_listing_count
-        FROM market_listings
-       WHERE buyer_id = ?
-         AND status = 'SOLD'
-    `).get(userId) as any;
+    const sellerMarketStats = db.prepare(sellerMarketStatsSql).get(userId, userId) as any;
+    const buyerMarketStats = db.prepare(buyerMarketStatsSql).get(userId, userId) as any;
     const activeBidStats = db.prepare(`
       SELECT COUNT(DISTINCT ml.id) AS c
         FROM market_listings ml
@@ -1499,6 +1512,8 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'market.active_auction_listing_count': Number(sellerMarketStats?.active_auction_listing_count || 0),
       'market.sold_listing_count': Number(sellerMarketStats?.sold_listing_count || 0),
       'market.bought_listing_count': Number(buyerMarketStats?.bought_listing_count || 0),
+      'market.distinct_buyer_count': Number(sellerMarketStats?.distinct_buyer_count || 0),
+      'market.distinct_seller_count': Number(buyerMarketStats?.distinct_seller_count || 0),
       'market.active_bid_count': Number(activeBidStats?.c || 0),
       'market.watch_count': Number(watchStats?.c || 0),
       'shop.unique_purchase_count': Number(shopStats?.c || 0),
@@ -1550,20 +1565,8 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
        WHERE uc.user_id = ? AND uc.quantity > 0
     `, userId);
     const achievementStats = await db.get(achievementAndMissionCountsSql, userId, userId);
-    const sellerMarketStats = await db.get(`
-      SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
-             SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
-             SUM(CASE WHEN status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
-             SUM(CASE WHEN status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count
-        FROM market_listings
-       WHERE seller_id = ?
-    `, userId);
-    const buyerMarketStats = await db.get(`
-      SELECT COUNT(*) AS bought_listing_count
-        FROM market_listings
-       WHERE buyer_id = ?
-         AND status = 'SOLD'
-    `, userId);
+    const sellerMarketStats = await db.get(sellerMarketStatsSql, userId, userId);
+    const buyerMarketStats = await db.get(buyerMarketStatsSql, userId, userId);
     const activeBidStats = await db.get(`
       SELECT COUNT(DISTINCT ml.id) AS c
         FROM market_listings ml
@@ -1648,6 +1651,8 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'market.active_auction_listing_count': Number(sellerMarketStats?.active_auction_listing_count || 0),
       'market.sold_listing_count': Number(sellerMarketStats?.sold_listing_count || 0),
       'market.bought_listing_count': Number(buyerMarketStats?.bought_listing_count || 0),
+      'market.distinct_buyer_count': Number(sellerMarketStats?.distinct_buyer_count || 0),
+      'market.distinct_seller_count': Number(buyerMarketStats?.distinct_seller_count || 0),
       'market.active_bid_count': Number(activeBidStats?.c || 0),
       'market.watch_count': Number(watchStats?.c || 0),
       'shop.unique_purchase_count': Number(shopStats?.c || 0),
@@ -1683,13 +1688,11 @@ export const incrementAchievementStats = async (userId: string, stats: Record<st
     txn();
   } else if (getDbMode() === 'MYSQL') {
     const db = getMysqlDb();
-    for (const [key, value] of entries) {
-      await db.run(`
-        INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
-        VALUES (?, ?, ?, JSON_OBJECT(), UTC_TIMESTAMP())
-        ON DUPLICATE KEY UPDATE stat_value = stat_value + VALUES(stat_value), updated_at = VALUES(updated_at)
-      `, userId, key, Math.trunc(Number(value)));
-    }
+    await db.run(`
+      INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
+      VALUES ${entries.map(() => '(?, ?, ?, JSON_OBJECT(), UTC_TIMESTAMP())').join(', ')}
+      ON DUPLICATE KEY UPDATE stat_value = stat_value + VALUES(stat_value), updated_at = VALUES(updated_at)
+    `, ...entries.flatMap(([key, value]) => [userId, key, Math.trunc(Number(value))]));
   } else {
     // Supabase deployments should create tables/RPC separately; best-effort read-modify-write avoids blocking core flows.
     const client = getSupabaseClient();
