@@ -5,6 +5,7 @@ import { createRealtimeNotification } from './notificationDelivery';
 import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 import { createAchievementEvaluationQueue } from './achievementEvaluationQueue';
 import { additionalAchievements } from './achievementCatalog';
+import { applyAchievementNameRevision } from './achievementNameRevision';
 import { ensureWeeklyMissionTables } from './weeklyMissionSchema';
 
 export type AchievementCategory =
@@ -558,7 +559,7 @@ const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updat
   },
   {
     code: 'first_market_purchase',
-    name: '첫 마켓 구매',
+    name: '장터에서 산 첫 카드',
     description: '오픈마켓에서 카드를 처음 구매했습니다.',
     category: 'market',
     tier: 'silver',
@@ -984,6 +985,7 @@ const seedDefaultAchievements = async () => {
         VALUES ${missing.map(() => placeholders).join(', ')} ${onConflict}`, ...missing.flatMap(values));
     }
   }
+  await applyAchievementNameRevision();
   invalidateAchievementCache();
 };
 

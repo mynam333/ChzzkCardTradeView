@@ -45,6 +45,45 @@ describe('expanded permanent achievements', () => {
     expect(db.prepare('SELECT status FROM user_achievements WHERE achievement_id = ?').get(legacy.id)).toEqual({ status: 'claimed' });
   });
 
+  it('upgrades only matching legacy titles once, keeping claims and administrator edits', async () => {
+    const restart = () => {
+      const saved = db.serialize();
+      db.close();
+      db = new Database(saved);
+      __setSqliteDbForTest(db);
+    };
+    const title = (code: string) => db.prepare('SELECT name FROM achievements WHERE code = ?').pluck().get(code);
+    db.exec(`
+      DELETE FROM system_configs WHERE key = 'achievement_names_2026_11_20';
+      UPDATE achievements SET name = '첫 마켓 구매' WHERE code = 'first_market_purchase';
+      UPDATE achievements SET name = '운영자가 정한 이름' WHERE code = 'arcade_guest_spotter';
+      INSERT INTO achievements(code, name, category, criteria_json)
+        VALUES ('100_minigame_win', '백전백승', 'minigame', '{"type":"stat","metric":"minigame.success.count","target":100}');
+    `);
+    const id = db.prepare("SELECT id FROM achievements WHERE code = '100_minigame_win'").pluck().get();
+    db.prepare(`INSERT INTO user_achievements(user_id, achievement_id, status, progress_current, progress_target, claimed_at)
+      VALUES (?, ?, 'claimed', 100, 100, '2026-11-01T00:00:00Z')`).run(owner, id);
+    db.prepare("INSERT INTO achievement_grant_logs(user_id, achievement_id, repeat_key, status) VALUES (?, ?, 'once', 'success')").run(owner, id);
+    db.exec(`CREATE TRIGGER reject_rename BEFORE UPDATE OF name ON achievements WHEN old.code = '100_minigame_win'
+      BEGIN SELECT RAISE(ABORT, 'rename interrupted'); END`);
+    restart();
+    await expect(ensureAchievementTables()).rejects.toThrow('rename interrupted');
+    expect(title('first_market_purchase')).toBe('첫 마켓 구매');
+    db.exec('DROP TRIGGER reject_rename');
+    await ensureAchievementTables();
+    expect(title('first_market_purchase')).toBe('장터에서 산 첫 카드');
+    expect(title('arcade_guest_spotter')).toBe('운영자가 정한 이름');
+    const view = (await listUserAchievements(owner)).items.find(a => a.achievement_id === id);
+    expect(view).toMatchObject({ name: '백 번째 승리', status: 'claimed', progress_current: 100, progress_target: 100,
+      claimed_at: '2026-11-01T00:00:00Z' });
+    expect(db.prepare('SELECT status FROM achievement_grant_logs WHERE user_id = ? AND achievement_id = ?').pluck().get(owner, id)).toBe('success');
+    expect((await claimAchievementReward(owner, Number(id))).reason).toBe('ALREADY_CLAIMED');
+    db.exec("UPDATE achievements SET name = '백전백승' WHERE code = '100_minigame_win'");
+    restart();
+    await ensureAchievementTables();
+    expect(title('100_minigame_win')).toBe('백전백승');
+  });
+
   it('credits past game counts, reveals secrets on completion and grants both tickets exactly once', async () => {
     const secretId = (await listAchievements()).find(a => a.code === 'secret_festival_staff')!.id;
     const setCount = db.prepare(`INSERT INTO user_achievement_stats(user_id, stat_key, stat_value) VALUES (?, ?, ?)
