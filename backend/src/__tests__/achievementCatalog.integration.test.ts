@@ -21,6 +21,14 @@ describe('expanded permanent achievements', () => {
   });
   afterEach(() => { __setSqliteDbForTest(null); db.close(); });
 
+  const restart = () => {
+    const saved = db.serialize();
+    db.close();
+    db = new Database(saved);
+    __setSqliteDbForTest(db);
+  };
+  const title = (code: string) => db.prepare('SELECT name FROM achievements WHERE code = ?').pluck().get(code);
+
   it('seeds distinct, editable goals and preserves customizations and awarded state across restarts', async () => {
     const catalog = await listAchievements();
     const goals = catalog.map(a => a.criteria_json.type === 'stat' ? [a.criteria_json] : a.criteria_json.conditions);
@@ -34,10 +42,7 @@ describe('expanded permanent achievements', () => {
     db.prepare("UPDATE achievements SET name = '운영자 수정', is_active = 0 WHERE id = ?").run(legacy.id);
     db.prepare("INSERT INTO user_achievements(user_id, achievement_id, status, repeat_key) VALUES (?, ?, 'claimed', 'once')").run(owner, legacy.id);
     db.prepare("DELETE FROM achievements WHERE code = 'mission_full_week'").run();
-    const saved = db.serialize();
-    db.close();
-    db = new Database(saved);
-    __setSqliteDbForTest(db);
+    restart();
     const reloaded = await listAchievements({ includeInactive: true });
     expect(reloaded).toHaveLength(catalog.length);
     expect(reloaded.find(a => a.id === legacy.id)).toMatchObject({ name: '운영자 수정', is_active: false });
@@ -46,16 +51,10 @@ describe('expanded permanent achievements', () => {
   });
 
   it('upgrades only matching legacy titles once, keeping claims and administrator edits', async () => {
-    const restart = () => {
-      const saved = db.serialize();
-      db.close();
-      db = new Database(saved);
-      __setSqliteDbForTest(db);
-    };
-    const title = (code: string) => db.prepare('SELECT name FROM achievements WHERE code = ?').pluck().get(code);
     db.exec(`
-      DELETE FROM system_configs WHERE key = 'achievement_names_2026_11_20';
+      DELETE FROM system_configs WHERE key IN ('achievement_names_2026_11_20', 'achievement_names_2026_11_20_idioms');
       UPDATE achievements SET name = '첫 마켓 구매' WHERE code = 'first_market_purchase';
+      UPDATE achievements SET name = '마흔 개의 별자리' WHERE code = 'growth_constellation';
       UPDATE achievements SET name = '운영자가 정한 이름' WHERE code = 'arcade_guest_spotter';
       INSERT INTO achievements(code, name, category, criteria_json)
         VALUES ('100_minigame_win', '백전백승', 'minigame', '{"type":"stat","metric":"minigame.success.count","target":100}');
@@ -71,17 +70,38 @@ describe('expanded permanent achievements', () => {
     expect(title('first_market_purchase')).toBe('첫 마켓 구매');
     db.exec('DROP TRIGGER reject_rename');
     await ensureAchievementTables();
-    expect(title('first_market_purchase')).toBe('장터에서 산 첫 카드');
+    expect(title('first_market_purchase')).toBe('첫 마켓 구매');
+    expect(title('growth_constellation')).toBe('별 헤는 밤');
     expect(title('arcade_guest_spotter')).toBe('운영자가 정한 이름');
     const view = (await listUserAchievements(owner)).items.find(a => a.achievement_id === id);
-    expect(view).toMatchObject({ name: '백 번째 승리', status: 'claimed', progress_current: 100, progress_target: 100,
+    expect(view).toMatchObject({ name: '백전백승', status: 'claimed', progress_current: 100, progress_target: 100,
       claimed_at: '2026-11-01T00:00:00Z' });
     expect(db.prepare('SELECT status FROM achievement_grant_logs WHERE user_id = ? AND achievement_id = ?').pluck().get(owner, id)).toBe('success');
     expect((await claimAchievementReward(owner, Number(id))).reason).toBe('ALREADY_CLAIMED');
-    db.exec("UPDATE achievements SET name = '백전백승' WHERE code = '100_minigame_win'");
+    db.exec("UPDATE achievements SET name = '백 번째 승리' WHERE code = '100_minigame_win'");
     restart();
     await ensureAchievementTables();
-    expect(title('100_minigame_win')).toBe('백전백승');
+    expect(title('100_minigame_win')).toBe('백 번째 승리');
+  });
+
+  it('upgrades the immediately preceding catalog atomically and preserves a deliberately restored title', async () => {
+    db.exec(`
+      DELETE FROM system_configs WHERE key = 'achievement_names_2026_11_20_idioms';
+      UPDATE achievements SET name = '모아 보니 별이 마흔 개' WHERE code = 'growth_constellation';
+      UPDATE achievements SET name = '이 둘이 한 쌍!' WHERE code = 'arcade_matching_pairs';
+      UPDATE achievements SET name = '오늘의 게스트 발견' WHERE code = 'arcade_guest_spotter';
+      CREATE TRIGGER stop_idiom_update BEFORE UPDATE OF name ON achievements WHEN old.code = 'arcade_matching_pairs'
+        BEGIN SELECT RAISE(ABORT, 'title update interrupted'); END;
+    `);
+    restart();
+    await expect(ensureAchievementTables()).rejects.toThrow('title update interrupted');
+    expect(title('growth_constellation')).toBe('모아 보니 별이 마흔 개');
+    expect(db.prepare("SELECT 1 FROM system_configs WHERE key = 'achievement_names_2026_11_20_idioms'").get()).toBeUndefined();
+    db.exec('DROP TRIGGER stop_idiom_update');
+    await ensureAchievementTables();
+    expect(title('growth_constellation')).toBe('별 헤는 밤');
+    expect(title('arcade_matching_pairs')).toBe('찰떡궁합');
+    expect(title('arcade_guest_spotter')).toBe('오늘의 게스트 발견');
   });
 
   it('credits past game counts, reveals secrets on completion and grants both tickets exactly once', async () => {

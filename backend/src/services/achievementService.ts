@@ -496,7 +496,7 @@ const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updat
   },
   {
     code: 'five_star_owner',
-    name: '최고 등급',
+    name: '하늘의 별 따기',
     description: '5성 카드를 1장 보유했습니다.',
     category: 'growth',
     tier: 'gold',
@@ -538,7 +538,7 @@ const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updat
   },
   {
     code: 'first_shop_purchase',
-    name: '첫 꾸미기 쇼핑',
+    name: '지름신 강림',
     description: '상점 아이템을 처음 구매했습니다.',
     category: 'economy',
     tier: 'bronze',
@@ -559,7 +559,7 @@ const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updat
   },
   {
     code: 'first_market_purchase',
-    name: '장터에서 산 첫 카드',
+    name: '첫 마켓 구매',
     description: '오픈마켓에서 카드를 처음 구매했습니다.',
     category: 'market',
     tier: 'silver',
