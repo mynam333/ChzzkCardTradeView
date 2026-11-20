@@ -9,6 +9,7 @@ vi.mock('../services/db', () => ({
   getMysqlDb: () => mocks.db,
   getSqlDialect: () => mocks.dialect
 }));
+vi.mock('../services/notificationDelivery', () => ({ createRealtimeNotification: vi.fn() }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -83,6 +84,38 @@ describe('achievement database load', () => {
     const batch = mocks.db.run.mock.calls.find(([, ...params]) => params.length > 100);
     expect(batch?.[0]).toContain('ON DUPLICATE KEY UPDATE');
     expect(batch?.[0]).not.toContain('IS DISTINCT FROM');
+  });
+
+  it.each(['postgres', 'mysql'])('reads ordinary progress once and only batches changes on %s', async (dialect) => {
+    mocks.dialect = dialect;
+    const { ensureAchievementTables, evaluateUserAchievements } = await import('../services/achievementService');
+    const { additionalAchievements } = await import('../services/achievementCatalog');
+    await ensureAchievementTables();
+    const catalog = additionalAchievements.map((a, index) => ({ ...a, id: index + 1 }));
+    const existing = catalog.slice(0, 5).map((a) => ({
+      achievement_id: a.id, status: 'claimed', progress_current: 1, progress_target: 1, progress_json: {}
+    }));
+    mocks.db.all.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM achievements WHERE is_active')) return catalog;
+      if (sql.includes('FROM user_achievements')) return existing;
+      return [];
+    });
+    mocks.db.run.mockClear();
+    await evaluateUserAchievements('owner');
+    const writes = mocks.db.run.mock.calls.filter(([sql]) => /INSERT INTO user_achievements\s/.test(sql));
+    expect(writes).toHaveLength(1);
+    expect(writes[0].slice(1)).toHaveLength((catalog.length - existing.length) * 8);
+    expect(writes[0][0]).toContain(dialect === 'postgres' ? "WHERE user_achievements.status <> 'claimed'" : "IF(status IN ('claimed', 'completed')");
+    expect(mocks.db.get.mock.calls.some(([sql]) => /AND achievement_id = \?/.test(sql))).toBe(false);
+    expect(mocks.db.all.mock.calls.filter(([sql]) => /FROM user_achievements WHERE user_id/.test(sql))).toHaveLength(1);
+    for (let offset = 1; offset < writes[0].length; offset += 8) {
+      const [, id, status, current, target, details] = writes[0].slice(offset, offset + 8);
+      existing.push({ achievement_id: id, status, progress_current: current, progress_target: target,
+        progress_json: Object.fromEntries(Object.entries(JSON.parse(details)).reverse()) });
+    }
+    mocks.db.run.mockClear();
+    await evaluateUserAchievements('owner');
+    expect(mocks.db.run.mock.calls.some(([sql]) => /INSERT INTO user_achievements\s/.test(sql))).toBe(false);
   });
 
   it('refreshes snapshots once when an event requests evaluation and refresh together', async () => {

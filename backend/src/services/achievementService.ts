@@ -4,6 +4,8 @@ import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
 import { createRealtimeNotification } from './notificationDelivery';
 import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 import { createAchievementEvaluationQueue } from './achievementEvaluationQueue';
+import { additionalAchievements } from './achievementCatalog';
+import { ensureWeeklyMissionTables } from './weeklyMissionSchema';
 
 export type AchievementCategory =
   | 'start'
@@ -154,6 +156,8 @@ const allowedMetrics = new Set([
   'achievement.completed_count',
   'achievement.claimed_count',
   'achievement.claimable_count',
+  'weekly_mission.claimed_count',
+  'weekly_mission.full_week_count',
   'inventory.card_count',
   'inventory.unique_streamer_count',
   'inventory.star.0.count',
@@ -197,6 +201,8 @@ const allowedMetrics = new Set([
 ]);
 
 const metricConditionText: Record<string, (target: number) => string> = {
+  'weekly_mission.claimed_count': (target) => `주간 미션 보상 ${target.toLocaleString()}회 수령`,
+  'weekly_mission.full_week_count': (target) => `주간 미션 보상 5개를 모두 수령한 주 ${target.toLocaleString()}회`,
   'login.count': (target) => `${target.toLocaleString()}회 로그인`,
   'login.daily.count': (target) => `${target.toLocaleString()}일 로그인`,
   'login.current_streak_days': (target) => `연속 출석 ${target.toLocaleString()}일 유지`,
@@ -598,7 +604,8 @@ const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updat
     },
     rewards_json: [{ type: 'point', points: 3000 }],
     created_by: null
-  }
+  },
+  ...additionalAchievements
 ];
 
 export const invalidateAchievementCache = () => {
@@ -764,8 +771,8 @@ const initializeAchievementTables = async (): Promise<void> => {
     } catch {
       db.exec('ALTER TABLE achievements ADD COLUMN limited_winner_count INTEGER;');
     }
-    sqliteReady = db;
     await seedDefaultAchievements();
+    sqliteReady = db;
     return;
   }
 
@@ -944,70 +951,37 @@ const initializeAchievementTables = async (): Promise<void> => {
 
 const seedDefaultAchievements = async () => {
   const mode = getDbMode();
+  const postgres = mode === 'MYSQL' && getSqlDialect() === 'postgres';
+  const columns = `(code, name, description, category, tier, icon, icon_color, is_active, is_hidden,
+    hidden_hint, sort_order, starts_at, ends_at, repeat_policy, claim_policy, progress_mode,
+    criteria_json, rewards_json, created_by)`;
+  const json = postgres ? '?::text::jsonb' : '?';
+  const placeholders = `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${json}, ${json}, ?)`;
+  const values = (item: typeof DEFAULT_ACHIEVEMENTS[number]) => [
+    item.code, item.name, item.description, item.category, item.tier, item.icon, item.icon_color,
+    postgres ? item.is_active : Number(item.is_active), postgres ? item.is_hidden : Number(item.is_hidden),
+    item.hidden_hint, item.sort_order, item.starts_at, item.ends_at, item.repeat_policy, item.claim_policy,
+    item.progress_mode, JSON.stringify(item.criteria_json), JSON.stringify(item.rewards_json), item.created_by
+  ];
+  const existingCodesSql = 'SELECT code FROM achievements';
   if (mode === 'LOCAL_SQL') {
     const db = getSqliteDb();
-    const stmt = db.prepare(`
-      INSERT INTO achievements
-        (code, name, description, category, tier, icon, icon_color, is_active, is_hidden, hidden_hint, sort_order,
-         starts_at, ends_at, repeat_policy, claim_policy, progress_mode, criteria_json, rewards_json, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(code) DO NOTHING
-    `);
-    const txn = db.transaction(() => {
+    db.transaction(() => {
+      const existing = new Set((db.prepare(existingCodesSql).all() as { code: string }[]).map(row => row.code));
+      const insert = db.prepare(`INSERT INTO achievements ${columns} VALUES ${placeholders} ON CONFLICT(code) DO NOTHING`);
       for (const item of DEFAULT_ACHIEVEMENTS) {
-        stmt.run(
-          item.code,
-          item.name,
-          item.description,
-          item.category,
-          item.tier,
-          item.icon,
-          item.icon_color,
-          item.is_active ? 1 : 0,
-          item.is_hidden ? 1 : 0,
-          item.hidden_hint,
-          item.sort_order,
-          item.starts_at,
-          item.ends_at,
-          item.repeat_policy,
-          item.claim_policy,
-          item.progress_mode,
-          JSON.stringify(item.criteria_json),
-          JSON.stringify(item.rewards_json),
-          item.created_by
-        );
+        if (!existing.has(item.code)) insert.run(...values(item));
       }
-    });
-    txn();
+    })();
   } else if (mode === 'MYSQL') {
     const db = getMysqlDb();
-    for (const item of DEFAULT_ACHIEVEMENTS) {
-      await db.run(`
-        INSERT IGNORE INTO achievements
-          (code, name, description, category, tier, icon, icon_color, is_active, is_hidden, hidden_hint, sort_order,
-           starts_at, ends_at, repeat_policy, claim_policy, progress_mode, criteria_json, rewards_json, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-        item.code,
-        item.name,
-        item.description,
-        item.category,
-        item.tier,
-        item.icon,
-        item.icon_color,
-        item.is_active ? 1 : 0,
-        item.is_hidden ? 1 : 0,
-        item.hidden_hint,
-        item.sort_order,
-        item.starts_at,
-        item.ends_at,
-        item.repeat_policy,
-        item.claim_policy,
-        item.progress_mode,
-        JSON.stringify(item.criteria_json),
-        JSON.stringify(item.rewards_json),
-        item.created_by
-      );
+    const existing = new Set((await db.all(existingCodesSql)).map(row => row.code));
+    const missing = DEFAULT_ACHIEVEMENTS.filter(item => !existing.has(item.code));
+    if (missing.length) {
+      const insert = postgres ? 'INSERT' : 'INSERT IGNORE';
+      const onConflict = postgres ? 'ON CONFLICT(code) DO NOTHING' : '';
+      await db.run(`${insert} INTO achievements ${columns}
+        VALUES ${missing.map(() => placeholders).join(', ')} ${onConflict}`, ...missing.flatMap(values));
     }
   }
   invalidateAchievementCache();
@@ -1366,6 +1340,21 @@ const recomputePointBalanceStat = async (userId: string): Promise<void> => {
   await setAchievementStat(userId, 'user.point_balance', Number(point || 0));
 };
 
+const achievementAndMissionCountsSql = `
+  SELECT achievements.*, missions.* FROM (
+    SELECT SUM(CASE WHEN status IN ('completed', 'claimed') THEN 1 ELSE 0 END) AS completed_count,
+           SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed_count,
+           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS claimable_count
+      FROM user_achievements WHERE user_id = ?
+  ) achievements CROSS JOIN (
+    SELECT COALESCE(SUM(claims), 0) AS weekly_claimed_count,
+           COUNT(CASE WHEN claims = 5 THEN 1 END) AS weekly_full_week_count
+      FROM (
+        SELECT COUNT(*) AS claims FROM weekly_mission_assignments
+         WHERE user_id = ? AND claimed_at IS NOT NULL GROUP BY week_key
+      ) claimed_weeks
+  ) missions`;
+
 export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   if (!userId) return;
@@ -1373,6 +1362,7 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
   // 포인트 잔액은 다른 기능 테이블의 상태와 무관한 핵심 조건입니다.
   // 부가 스냅샷 조회 하나가 실패하더라도 포인트 업적 평가는 최신 잔액을 사용해야 합니다.
   await recomputePointBalanceStat(userId);
+  if (getDbMode() === 'LOCAL_SQL' || getDbMode() === 'MYSQL') await ensureWeeklyMissionTables();
   if (getDbMode() === 'LOCAL_SQL') {
     const db = getSqliteDb();
     const cardStats = db.prepare(`
@@ -1406,15 +1396,9 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
              COALESCE(SUM(CASE WHEN si.type = 'name_effect' THEN uc.quantity ELSE 0 END), 0) AS name_effect_count
         FROM user_cosmetics uc
         LEFT JOIN shop_items si ON si.id = uc.item_id
-       WHERE uc.user_id = ?
+       WHERE uc.user_id = ? AND uc.quantity > 0
     `).get(userId) as any;
-    const achievementStats = db.prepare(`
-      SELECT SUM(CASE WHEN status IN ('completed', 'claimed') THEN 1 ELSE 0 END) AS completed_count,
-             SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed_count,
-             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS claimable_count
-        FROM user_achievements
-       WHERE user_id = ?
-    `).get(userId) as any;
+    const achievementStats = db.prepare(achievementAndMissionCountsSql).get(userId, userId) as any;
     const sellerMarketStats = db.prepare(`
       SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
              SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
@@ -1473,6 +1457,8 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'achievement.completed_count': Number(achievementStats?.completed_count || 0),
       'achievement.claimed_count': Number(achievementStats?.claimed_count || 0),
       'achievement.claimable_count': Number(achievementStats?.claimable_count || 0),
+      'weekly_mission.claimed_count': Number(achievementStats?.weekly_claimed_count || 0),
+      'weekly_mission.full_week_count': Number(achievementStats?.weekly_full_week_count || 0),
       'inventory.card_count': Number(cardStats?.card_count || 0),
       'inventory.unique_streamer_count': Number(cardStats?.unique_streamer_count || 0),
       'inventory.star.0.count': Number(cardStats?.star0_count || 0),
@@ -1559,15 +1545,9 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
              COALESCE(SUM(CASE WHEN si.type = 'name_effect' THEN uc.quantity ELSE 0 END), 0) AS name_effect_count
         FROM user_cosmetics uc
         LEFT JOIN shop_items si ON si.id = uc.item_id
-       WHERE uc.user_id = ?
+       WHERE uc.user_id = ? AND uc.quantity > 0
     `, userId);
-    const achievementStats = await db.get(`
-      SELECT SUM(CASE WHEN status IN ('completed', 'claimed') THEN 1 ELSE 0 END) AS completed_count,
-             SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed_count,
-             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS claimable_count
-        FROM user_achievements
-       WHERE user_id = ?
-    `, userId);
+    const achievementStats = await db.get(achievementAndMissionCountsSql, userId, userId);
     const sellerMarketStats = await db.get(`
       SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
              SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
@@ -1626,6 +1606,8 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'achievement.completed_count': Number(achievementStats?.completed_count || 0),
       'achievement.claimed_count': Number(achievementStats?.claimed_count || 0),
       'achievement.claimable_count': Number(achievementStats?.claimable_count || 0),
+      'weekly_mission.claimed_count': Number(achievementStats?.weekly_claimed_count || 0),
+      'weekly_mission.full_week_count': Number(achievementStats?.weekly_full_week_count || 0),
       'inventory.card_count': Number(cardStats?.card_count || 0),
       'inventory.unique_streamer_count': Number(cardStats?.unique_streamer_count || 0),
       'inventory.star.0.count': Number(cardStats?.star0_count || 0),
@@ -1881,6 +1863,59 @@ const limitedWinnerLimit = (achievement: Achievement) =>
 const isAchievementWinnerStatus = (status: unknown) =>
   status === 'completed' || status === 'claimed';
 
+const isStandardOneTimeAchievement = (achievement: Achievement) =>
+  achievement.repeat_policy === 'once' && !limitedWinnerLimit(achievement) && !hasRevocableRewards(achievement);
+
+const saveStandardOneTimeProgress = async (
+  userId: string, achievements: Achievement[], stats: Record<string, number>, evaluatedAt: string
+) => {
+  if (!achievements.length) return;
+  const db = getMysqlDb();
+  const existing = await db.all(`
+    SELECT achievement_id, status, progress_current, progress_target, progress_json, completed_at
+      FROM user_achievements WHERE user_id = ? AND repeat_key = 'once'`, userId);
+  const byId = new Map(existing.map(row => [Number(row.achievement_id), row]));
+  const now = toMysqlDateTime(evaluatedAt);
+  const changes = [];
+  for (const achievement of achievements) {
+    const row = byId.get(achievement.id);
+    if (row?.status === 'claimed') continue;
+    const result = evaluateCriteria(achievement.criteria_json, stats);
+    const status = row?.status === 'completed' || result.complete ? 'completed'
+      : result.rawCurrent > 0 ? 'in_progress' : 'locked';
+    const previous = safeJsonParse<Record<string, number>>(row?.progress_json, {}) ?? {};
+    if (row?.status === status && Number(row.progress_current) === result.rawCurrent &&
+        Number(row.progress_target) === result.target && (!result.complete || row.completed_at) &&
+        Object.keys(previous).length === Object.keys(result.details).length &&
+        Object.entries(result.details).every(([metric, value]) => previous[metric] === value)) continue;
+    changes.push([userId, achievement.id, status, result.rawCurrent, result.target,
+      JSON.stringify(result.details), result.complete ? now : null, now]);
+  }
+  const postgres = getSqlDialect() === 'postgres';
+  const rowSql = `(?, ?, 'once', ?, ?, ?, ${postgres ? '?::text::jsonb' : '?'}, ?, ?)`;
+  // A claim can commit after the preload. Preserve its status and timestamps inside the upsert.
+  const onConflict = postgres ? `
+    ON CONFLICT (user_id, achievement_id, repeat_key) DO UPDATE SET
+      progress_current = EXCLUDED.progress_current, progress_target = EXCLUDED.progress_target,
+      progress_json = EXCLUDED.progress_json, last_evaluated_at = EXCLUDED.last_evaluated_at,
+      completed_at = COALESCE(user_achievements.completed_at, EXCLUDED.completed_at),
+      status = CASE WHEN user_achievements.status = 'completed' THEN 'completed' ELSE EXCLUDED.status END
+    WHERE user_achievements.status <> 'claimed'` : `
+    ON DUPLICATE KEY UPDATE
+      progress_current = IF(status = 'claimed', progress_current, VALUES(progress_current)),
+      progress_target = IF(status = 'claimed', progress_target, VALUES(progress_target)),
+      progress_json = IF(status = 'claimed', progress_json, VALUES(progress_json)),
+      last_evaluated_at = IF(status = 'claimed', last_evaluated_at, VALUES(last_evaluated_at)),
+      completed_at = IF(status = 'claimed', completed_at, COALESCE(completed_at, VALUES(completed_at))),
+      status = IF(status IN ('claimed', 'completed'), status, VALUES(status))`;
+  for (let index = 0; index < changes.length; index += 100) {
+    const batch = changes.slice(index, index + 100);
+    await db.run(`INSERT INTO user_achievements
+      (user_id, achievement_id, repeat_key, status, progress_current, progress_target, progress_json, completed_at, last_evaluated_at)
+      VALUES ${batch.map(() => rowSql).join(', ')} ${onConflict}`, ...batch.flat());
+  }
+};
+
 const evaluateUserAchievementsOnce = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   await recomputeSnapshotStats(userId).catch((err) => {
@@ -1949,8 +1984,10 @@ const evaluateUserAchievementsOnce = async (userId: string): Promise<void> => {
   } else if (getDbMode() === 'MYSQL') {
     const db = getMysqlDb();
     const nowMysql = toMysqlDateTime(nowIso);
-    for (const achievement of achievements) {
-      if (!activeInWindow(achievement)) continue;
+    const active = achievements.filter(activeInWindow);
+    await saveStandardOneTimeProgress(userId, active.filter(isStandardOneTimeAchievement), stats, nowIso);
+    for (const achievement of active) {
+      if (isStandardOneTimeAchievement(achievement)) continue;
       const repeatKey = getRepeatKey(achievement);
       const current = await db.get('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?', userId, achievement.id, repeatKey);
       const revocable = hasRevocableRewards(achievement);

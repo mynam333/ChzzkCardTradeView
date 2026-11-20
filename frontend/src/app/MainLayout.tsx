@@ -66,7 +66,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     { id: 'shop', label: '상점', icon: Store },
     { id: 'inventory', label: '보관함', icon: Layers },
     { id: 'arcade', label: '미니게임', icon: Gamepad2 },
-    { id: 'achievements', label: '업적', icon: Award },
+    { id: 'achievements', label: '업적&미션', icon: Award },
     { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
     { id: 'friends', label: '친구', icon: MessageCircle },
     { id: 'my-info', label: '내 정보', icon: User },

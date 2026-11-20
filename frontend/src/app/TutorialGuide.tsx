@@ -70,7 +70,7 @@ const sectionLabels: Record<TutorialSection, string> = {
   shop: '상점',
   inventory: '보관함',
   arcade: '미니게임',
-  achievements: '업적',
+  achievements: '업적&미션',
   ranking: '랭킹',
   friends: '친구',
   'my-info': '내 정보',
@@ -276,10 +276,10 @@ const tutorialSteps: TutorialStep[] = [
     id: 'achievements-overview',
     section: 'achievements',
     tab: 'achievements',
-    title: '업적은 다음 목표를 알려줘요',
+    title: '업적과 이번 주 미션을 확인해요',
     lines: [
-      '업적 탭에서는 출석, 수집, 경제, 교환, 마켓, 미니게임 같은 활동 목표를 한눈에 볼 수 있어요.',
-      '뭘 해야 할지 애매할 때는 추천순이나 진행도순으로 보면 다음 행동이 꽤 잘 잡힙니다.'
+      '업적&미션 탭에서 카드 수집, 교환, 마켓, 미니게임으로 달성한 업적과 받을 보상을 확인해 보세요.',
+      '매주 월요일 0시(한국 시간)에 나만의 주간 미션 다섯 개가 새로 열려요. 이번 주 보상은 그전에 받아 주세요.'
     ],
     target: 'achievements-overview'
   },

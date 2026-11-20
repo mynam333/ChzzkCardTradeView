@@ -415,14 +415,14 @@ export interface UserAchievement {
   icon: string | null;
   icon_color: string | null;
   is_hidden: boolean;
-  is_secret: boolean;
+  hidden_hint: string | null;
   status: AchievementStatus;
-  progress_current: number;
-  progress_target: number;
-  progress_percent: number;
+  progress_current: number | null;
+  progress_target: number | null;
+  progress_percent: number | null;
   completed_at: string | null;
   claimed_at: string | null;
-  rewards: AchievementReward[];
+  rewards: AchievementReward[] | null;
 }
 
 export interface UserAchievementsResponse {

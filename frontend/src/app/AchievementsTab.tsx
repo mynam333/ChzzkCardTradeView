@@ -157,6 +157,8 @@ export const AchievementsTab: React.FC = () => {
   const [sort, setSort] = useState<SortOption>('recommended');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
+  const achievementRequest = useRef<AbortController | null>(null);
+  const [achievementRevision, setAchievementRevision] = useState(0);
   const [claimingId, setClaimingId] = useState<number | null>(null);
   const userId = user ? String(user.id) : '';
   const [weeklyState, setWeeklyState] = useState<{ ownerId: string; payload: WeeklyMissionsPayload | null; loading: boolean; error: string }>({
@@ -308,6 +310,7 @@ export const AchievementsTab: React.FC = () => {
       setWeeklyState({ ownerId: token.ownerId, payload, loading: false, error: '' });
       const claimResult = raw?.claim_result as { already_claimed?: boolean } | undefined;
       toast(claimResult?.already_claimed ? '이미 수령한 주간 미션 보상입니다.' : '주간 미션 보상을 수령했습니다.', 'success');
+      setAchievementRevision(value => value + 1);
       void refreshUserData();
     } catch (error) {
       if ((timedOut || !controller.signal.aborted) && weeklyClaimRequest.current === token) {
@@ -322,39 +325,51 @@ export const AchievementsTab: React.FC = () => {
     }
   }, [weekly, userId, toast, loadWeeklyMissions, refreshUserData]);
 
-  const fetchAchievements = async () => {
-    if (!user) return;
+  const fetchAchievements = useCallback(async () => {
+    if (!userId) return;
+    achievementRequest.current?.abort();
+    const controller = new AbortController();
+    achievementRequest.current = controller;
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (status !== 'all') params.set('status', status);
       if (category !== 'all') params.set('category', category);
-      if (hidden !== 'all') params.set('hidden', hidden);
+      if (hidden !== 'all') params.set('hidden', String(hidden === 'hidden'));
       params.set('sort', sort);
-      const res = await apiFetch(`/achievements?${params.toString()}`);
+      const res = await apiFetch(`/achievements?${params.toString()}`, { signal: controller.signal });
       const data = await res.json().catch(() => null) as (UserAchievementsResponse & { message?: string }) | null;
+      if (controller.signal.aborted) return;
       if (!res.ok || !data) {
         toast(data?.message || '업적 목록을 불러오지 못했습니다.', 'error');
         return;
       }
       setItems(data.items || []);
       setSummary(data.summary || {});
+    } catch {
+      if (!controller.signal.aborted) toast('업적 목록을 불러오지 못했습니다.', 'error');
     } finally {
-      setLoading(false);
+      if (achievementRequest.current === controller) {
+        achievementRequest.current = null;
+        setLoading(false);
+      }
     }
-  };
+  }, [userId, status, category, hidden, sort, toast]);
 
   useEffect(() => {
     const start = window.setTimeout(() => { void fetchAchievements(); }, 0);
-    return () => window.clearTimeout(start);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, status, category, hidden, sort]);
+    return () => {
+      window.clearTimeout(start);
+      achievementRequest.current?.abort();
+      achievementRequest.current = null;
+    };
+  }, [fetchAchievements, achievementRevision]);
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return items;
     return items.filter((item) => {
-      const haystack = `${item.name} ${item.description || ''} ${item.code || ''} ${categoryLabels[item.category] || ''}`.toLowerCase();
+      const haystack = [item.name, item.description, item.code, item.condition_text, item.hidden_hint, categoryLabels[item.category]].join(' ').toLowerCase();
       return haystack.includes(keyword);
     });
   }, [items, search]);
@@ -369,7 +384,8 @@ export const AchievementsTab: React.FC = () => {
         return;
       }
       toast(data.message || '업적 보상을 수령했습니다.', 'success');
-      await Promise.all([fetchAchievements(), refreshUserData()]);
+      setAchievementRevision(value => value + 1);
+      await refreshUserData();
     } finally {
       setClaimingId(null);
     }
@@ -401,8 +417,8 @@ export const AchievementsTab: React.FC = () => {
               <Trophy className="h-5 w-5" />
             </span>
             <div>
-              <h2 className="text-xl font-black text-foreground">업적</h2>
-              <p className="text-xs text-muted-foreground">달성 {completed.toLocaleString()} / 전체 {total.toLocaleString()}</p>
+              <h2 className="text-xl font-black text-foreground">업적&amp;미션</h2>
+              <p className="text-xs text-muted-foreground">업적 {total.toLocaleString()}개 중 {completed.toLocaleString()}개 달성</p>
             </div>
           </div>
         </div>
@@ -545,7 +561,7 @@ export const AchievementsTab: React.FC = () => {
                     {item.description || (masked ? '달성 전까지 내용이 공개되지 않습니다.' : '설명 없음')}
                   </p>
                   <p className="mt-2 rounded-lg bg-secondary/45 px-2.5 py-1.5 text-[10px] font-bold leading-relaxed text-muted-foreground">
-                    {masked ? '달성 조건 비공개' : `달성 조건: ${item.condition_text || '조건 없음'}`}
+                    {masked ? item.hidden_hint || '달성 조건 비공개' : `달성 조건: ${item.condition_text || '조건 없음'}`}
                   </p>
                 </div>
               </div>
@@ -553,10 +569,10 @@ export const AchievementsTab: React.FC = () => {
               <div className="mt-4">
                 <div className="mb-1 flex items-center justify-between text-[10px] font-black text-muted-foreground">
                   <span>{statusLabels[item.status] || item.status}</span>
-                  <span>{masked ? '???' : `${item.progress_current.toLocaleString()} / ${item.progress_target.toLocaleString()}`}</span>
+                  <span>{masked ? '???' : `${(item.progress_current ?? 0).toLocaleString()} / ${(item.progress_target ?? 1).toLocaleString()}`}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                  <div className={`h-full rounded-full ${item.status === 'claimed' ? 'bg-primary' : claimable ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${Math.max(0, Math.min(100, item.progress_percent))}%` }} />
+                  <div className={`h-full rounded-full ${item.status === 'claimed' ? 'bg-primary' : claimable ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${Math.max(0, Math.min(100, item.progress_percent ?? 0))}%` }} />
                 </div>
               </div>
 
